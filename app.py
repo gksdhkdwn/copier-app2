@@ -44,7 +44,7 @@ if "custom_formats" not in st.session_state:
         "C7070": txt_apeos, "Apeos": txt_apeos, "5700": txt_5700,
         "L5100": txt_l5100, "2554": txt_ricoh, "C3003": txt_ricoh,
         "C4504": txt_ricoh, "5005": txt_5005, 
-        "X3220NR": txt_x3220, "X-9201": txt_x3220,  # 3220과 9201 쌍둥이 조건 적용
+        "X3220NR": txt_x3220, "X-9201": txt_x3220, 
         "SL-": txt_samsung, "기본 기종": txt_default
     }
 
@@ -87,66 +87,4 @@ with tabs[0]:
                 
                 # 업체명 추출
                 lines = [l.strip() for l in block.split('\n') if l.strip()]
-                if lines and len(lines) > 1 and ('[' in lines[0] or '【' in lines[0]):
-                    detected_name = lines[1]
-                elif lines:
-                    detected_name = lines[0]
-                else:
-                    detected_name = "거래처 확인 바람"
-                
-                # 기종 자동 매칭
-                matched_machine = "기본 기종"
-                block_lower = block.lower()
-                
-                if "9201" in block_lower:
-                    matched_machine = "X-9201"
-                elif "x3220" in block_lower or "3220" in block_lower:
-                    matched_machine = "X3220NR"
-                elif "sl-" in block_lower:
-                    matched_machine = "SL-"
-                else:
-                    for k in machine_options:
-                        if k not in ["기본 기종", "X3220NR", "X-9201", "SL-"] and k.lower() in block_lower:
-                            matched_machine = k
-                            break
-                
-                # 3열 입력 상자 UI 구현
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col1:
-                    u_name = st.text_input(f"업체명 ({i})", value=detected_name, key=f"nm_{i}")
-                with col2:
-                    u_phone = st.text_input(f"고객 연락처 ({i})", value=detected_phone, key=f"ph_{i}")
-                with col3:
-                    default_idx = machine_options.index(matched_machine) if matched_machine in machine_options else machine_options.index("기본 기종")
-                    u_machine = st.selectbox(f"복사기 기종 ({i})", options=machine_options, index=default_idx, key=f"mc_{i}")
-                
-                # 실시간 사동 동기화 처리
-                how_to_print = st.session_state.custom_formats.get(u_machine, txt_default)
-                
-                if "안녕하세요" in how_to_print or "사용량확인차" in how_to_print:
-                    final_msg = f"{how_to_print}\n(기종: {u_machine})\n매번 번거롭게 해드려 죄송합니다."
-                else:
-                    final_msg = (
-                        f"안녕하세요 퍼스트 전산입니다.\n"
-                        f"마감을 위해 마감 카운터 사진이 필요하여 연락드렸습니다.\n"
-                        f"카운터 한장만 보내주시면 감사하겠습니다.\n\n"
-                        f"▶ 기종: {u_machine}\n"
-                        f"▶ 방법: {how_to_print}\n\n"
-                        f"매번 번거롭게 해드려 죄송합니다."
-                    )
-                
-                st.text_area(f"💬 최종 발송 문구 미리보기 ({i})", value=final_msg, height=140, key=f"txt_{i}")
-                
-                # 갤럭시 모바일 다이렉트 전산 연동 링크 생성
-                encoded_msg = urllib.parse.quote(final_msg)
-                clean_phone = re.sub(r'[^0-9]', '', u_phone) # 하이픈 제거
-                sms_url = f"sms:{clean_phone}?body={encoded_msg}"
-                
-                # 컴퓨터용 복사 버튼과 갤럭시 문자앱 즉시 발송 버튼 2종 세트 구성
-                btn_col1, btn_col2 = st.columns([1, 1])
-                with btn_col1:
-                    st.copy_to_clipboard(final_msg, label=f"📋 컴퓨터 전용: {u_name} 텍스트 복사")
-                with btn_col2:
-                    if clean_phone and clean_phone != "연락처없음":
-                        st.markdown(
-                            f'<a href="{sms_url}" target="_self" style="display: inline-block; width: 100%; text-align: center; padding: 0.45rem; background-color: #FF
+                if lines and len(lines) > 1 and ('
