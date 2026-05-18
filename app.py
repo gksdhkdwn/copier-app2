@@ -1,87 +1,114 @@
 import streamlit as st
 import re
-import urllib.parse
 
-st.set_page_config(page_title="퍼스트전산 마감 도우미", page_icon="📱", layout="centered")
+st.set_page_config(page_title="퍼스트전산 마감 도우미", page_icon="📱", layout="wide")
 st.title("퍼스트전산 마감 도우미 📱")
-st.caption("카톡 내용을 복사해 넣으면 맞춤형 안내 문자를 자동으로 만들어 드립니다.")
+st.caption("카톡 내용을 복사해 넣으면 여러 업체의 맞춤형 안내 문자를 한 번에 자동으로 만들어 드립니다.")
 
-if "instructions" not in st.session_state:
-    st.session_state.instructions = {
-        "D410": "화면 우측의 [카운터] 버튼을 누르신 후 [사용량 확인] 화면을 촬영해 주세요.",
-        "D420": "화면 우측의 [카운터] 버튼을 누르신 후 [사용량 확인] 화면을 촬영해 주세요.",
-        "D450": "조작부 홈 화면에서 [카운터] 아이콘을 누르고 전체 화면을 촬영해 주세요.",
-        "D451": "조작부 홈 화면에서 [카운터] 아이콘을 누르고 전체 화면을 촬영해 주세요.",
-        "BH": "[메뉴] -> [카운터] 버튼을 순서대로 누르신 후 화면을 촬영해 주세요.",
-        "X3220": "화면에서 [설정] -> [기기 정보] -> [카운터] 화면을 촬영해 주세요.",
-        "C3060": "조작부의 [인증/사양설정] 버튼 누른 후 [카운터 확인]을 촬영해 주세요.",
-        "TASKalfa": "기기 본체의 [카운터] 물리 버튼을 누른 후 나오는 화면을 촬영해 주세요."
+# 세션 상태 초기화
+if "custom_formats" not in st.session_state:
+    st.session_state.custom_formats = {
+        "기본 기종": "안녕하세요 퍼스트전산입니다. {업체명} {기종} 마감 문자 발송드립니다.",
+        "X3220": "안녕하세요 퍼스트전산입니다. {업체명} X3220 기종 마감일 안내입니다. 담당자 연락처: {고객연락처}"
     }
-if "base_msg" not in st.session_state:
-    st.session_state.base_msg = "안녕하세요 {company} 고객님! 퍼스트전산입니다. 마감 진행을 위해 카운터 사진이 필요하여 요청드립니다.\n\n📌 [{model}] 카운터 확인 방법:\n{instruction}\n\n확인하신 화면을 이 번호로 사진 문자 보내주시거나 카카오톡 채널로 전송해 주시면 감사하겠습니다. 매번 번거롭게 해드려 죄송합니다!"
 
-tab1, tab2 = st.tabs(["📝 마감 문자 작성", "⚙️ 기종 및 문구 설정"])
+tabs = st.tabs(["📝 마감 문자 대량 작성", "⚙️ 기종 및 문구 설정"])
 
-with tab1:
-    katalk_input = st.text_area("📋 카톡방에서 복사한 내용을 여기에 붙여넣으세요:", height=150)
-    extracted_phone = ""
-    extracted_company = ""
-    detected_model = "기타 기종"
+with tabs[0]:
+    raw_text = st.text_area("카톡방에서 복사한 내용을 여기에 통째로 붙여넣으세요:", height=200, placeholder="예시:\n【수도권C】\n26-05\n\n[강남구]\n17, 17S(주)피치스그룹코리아성동구 피치스도원매월마감\n01051381938\n\n【지방A】\n[부산]\n(주)대박상사 매월마감\n01012345678")
+    
+    if raw_text:
+        # 1. 폰번호(010...)를 기준으로 각 업체의 덩어리를 분리하는 정규식
+        # 번호가 끝나고 다음 텍스트가 나오기 전까지 분할하거나, 폰번호 자체를 경계로 삼음
+        blocks = []
+        
+        # 단순 줄바꿈이나 특정 패턴을 기준으로 데이터 파싱 시도
+        # 폰번호 양식 매칭 (예: 01012345678 또는 010-1234-5678)
+        phone_pattern = r'(01[016789][-.\s]?\d{3,4}[-.\s]?\d{4})'
+        
+        # 텍스트 내에서 모든 휴대폰 번호의 위치를 찾음
+        matches = list(re.finditer(phone_pattern, raw_text))
+        
+        start_idx = 0
+        for match in matches:
+            end_idx = match.end()
+            # 휴대폰 번호가 포함된 하나의 덩어리를 추출
+            block_text = raw_text[start_idx:end_idx].strip()
+            if block_text:
+                blocks.append(block_text)
+            start_idx = end_idx
+            
+        # 만약 번호 기준 분할이 안 되었거나 남은 텍스트가 있으면 전체를 처리하도록 보완
+        if not blocks and raw_text.strip():
+            blocks = [raw_text.strip()]
+        elif start_idx < len(raw_text) and raw_text[start_idx:].strip():
+            # 마지막 폰번호 이후에 남은 텍스트가 있다면 이전 블록에 합치거나 새로 추가
+            if blocks:
+                blocks[-1] = blocks[-1] + "\n" + raw_text[start_idx:].strip()
 
-    if katalk_input:
-        phone_match = re.search(r'010[-.\s]?\d{3,4}[-.\s]?\d{4}', katalk_input)
-        if phone_match:
-            extracted_phone = phone_match.group().replace("-", "").strip()
-        lines = [line.strip() for line in katalk_input.split('\n') if line.strip()]
-        for i, line in enumerate(lines):
-            if extracted_phone and (extracted_phone in line or (phone_match and phone_match.group() in line)):
-                if i > 0:
-                    extracted_company = lines[i-1].split("매월")[0].split("15")[0].strip()
-        for model_key in st.session_state.instructions.keys():
-            if model_key.lower() in katalk_input.lower():
-                detected_model = model_key
-                break
+        st.subheader(r"🔍 자동 인식된 업체 목록 (총 {}건)".format(len(blocks)))
+        
+        # 각 블록(업체)별로 반복문 돌면서 화면에 표출
+        for i, block in enumerate(blocks, 1):
+            with st.container():
+                st.markdown(f"### 🏢 업체 {i}")
+                
+                # 전화번호 추출
+                phone_match = re.search(phone_pattern, block)
+                phone = phone_match.group(1) if phone_match else "연락처 없음"
+                
+                # 가짜로 업체명과 기종 추출하는 로직 (기존 카톡 패턴 기반)
+                lines = [line.strip() for line in block.split('\n') if line.strip()]
+                
+                company = "알 수 없는 업체"
+                machine = "기본 기종"
+                
+                # 괄호 나 기종명 단어 찾기
+                for line in lines:
+                    if '주)' in line or '(' in line or '회사' in line or '상사' in line:
+                        company = line
+                        break
+                    elif len(line) > 3 and not re.search(phone_pattern, line) and '【' not in line and '[' not in line:
+                        company = line
+                
+                # 기종 매칭 테스트
+                for k in st.session_state.custom_formats.keys():
+                    if k.lower() in block.lower():
+                        machine = k
+                        break
+                
+                # 사용자 수정 입력칸 (가로로 배치)
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    u_company = st.text_input(f"업체명 수정 ({i})", value=company, key=f"comp_{i}")
+                with col2:
+                    u_phone = st.text_input(f"연락처 수정 ({i})", value=phone, key=f"phone_{i}")
+                with col3:
+                    u_machine = st.selectbox(f"기종 선택 ({i})", options=list(st.session_state.custom_formats.keys()), index=list(st.session_state.custom_formats.keys()).index(machine) if machine in st.session_state.custom_formats else 0, key=f"mach_{i}")
+                
+                # 문자 미리보기 및 복사
+                fmt = st.session_state.custom_formats.get(u_machine, st.session_state.custom_formats["기본 기종"])
+                final_msg = fmt.format(업체명=u_company, 고객연락처=u_phone, 기종=u_machine)
+                
+                st.text_area(f"📋 최종 발송 문구 미리보기 ({i}) - 아래 상자 우측 상단 버튼으로 복사 가능", value=final_msg, height=100, key=f"msg_{i}")
+                st.markdown("---")
 
-    st.subheader("🔍 자동 인식된 정보 (수정 가능)")
-    company = st.text_input("🏢 업체명", value=extracted_company)
-    phone = st.text_input("📞 고객 연락처", value=extracted_phone)
-    model_list = list(st.session_state.instructions.keys()) + ["기타 기종"]
-    default_index = model_list.index(detected_model) if detected_model in model_list else len(model_list)-1
-    selected_model = st.selectbox("🖨️ 복사기 기종 선택", model_list, index=default_index)
-    current_instruction = st.session_state.instructions.get(selected_model, "복사기 정면 혹은 상단의 카운터 버튼을 눌러 확인해 주세요.")
-
-    final_msg = st.session_state.base_msg.format(
-        company=company,
-        model=selected_model,
-        instruction=current_instruction
-    )
-    st.subheader("✉️ 최종 발송 문구 미리보기")
-    final_msg_edited = st.text_area("", value=final_msg, height=180)
-
-    if phone:
-        encoded_msg = urllib.parse.quote(final_msg_edited)
-        sms_url = f"sms:{phone}?body={encoded_msg}"
-        st.markdown(f'<a href="{sms_url}" target="_blank"><button style="width:100%; height:55px; background-color:#25D366; color:white; border:none; border-radius:10px; font-size:18px; font-weight:bold; cursor:pointer;">✉️ 갤럭시 문자로 내보내기</button></a>', unsafe_allow_html=True)
-    else:
-        st.info("카톡 내용을 입력하시면 문자 보내기 버튼이 활성화됩니다.")
-
-with tab2:
-    st.subheader("⚙️ 복사기 기종별 안내 문구 수정")
-    for k, v in list(st.session_state.instructions.items()):
-        col1, col2 = st.columns([1, 3])
-        with col1:
-            st.text(k)
-        with col2:
-            st.session_state.instructions[k] = st.text_input(f"{k} 설명", value=v, label_visibility="collapsed")
-    st.write("---")
-    st.write("➕ 새로운 복사기 기종 추가")
-    new_model = st.text_input("새 기종 이름 (예: C3300)")
-    new_inst = st.text_input("새 기종 카운터 확인 방법 설명")
+with tabs[1]:
+    st.subheader("⚙️ 기종별 맞춤 문구 설정")
+    st.write("여기서 기종을 추가하거나 기종별 문구를 수정할 수 있습니다.")
+    
+    for machine_type, text_format in list(st.session_state.custom_formats.items()):
+        col_k, col_v = st.columns([1, 3])
+        with col_k:
+            st.markdown(f"**{machine_type}**")
+        with col_v:
+            st.session_state.custom_formats[machine_type] = st.text_area(f"{machine_type} 문구 양식", value=text_format, key=f"setting_{machine_type}", height=70)
+            
+    # 새 기종 추가
+    st.markdown("#### ➕ 새 기종 추가")
+    new_mach = st.text_input("새로운 기종명 (예: C3525)")
+    new_fmt = st.text_area("새 기종의 문자 양식 (힌트: {업체명}, {기종}, {고객연락처} 라고 적으면 그 자리에 자동으로 들어갑니다)", value="안녕하세요 {업체명} 마감 문자입니다.")
     if st.button("기종 추가하기"):
-        if new_model and new_inst:
-            st.session_state.instructions[new_model] = new_inst
-            st.success(f"[{new_model}] 기종이 성공적으로 추가되었습니다!")
+        if new_mach:
+            st.session_state.custom_formats[new_mach] = new_fmt
             st.rerun()
-    st.write("---")
-    st.subheader("📝 기본 문자 양식 수정")
-    st.session_state.base_msg = st.text_area("기본 문자 양식", value=st.session_state.base_msg, height=150)
