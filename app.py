@@ -112,12 +112,12 @@ with tabs[0]:
                 # 입력 UI 배치
                 col1, col2, col3 = st.columns([2, 1, 1])
                 with col1:
-                    u_name = st.text_input(f"업체명 ({i})", value=detected_name, key=f"nm_{i}_{matched_machine}")
+                    u_name = st.text_input(f"업체명 ({i})", value=detected_name, key=f"nm_{i}_{matched_machine}_{i}")
                 with col2:
-                    u_phone = st.text_input(f"연락처 ({i})", value=detected_phone, key=f"ph_{i}_{matched_machine}")
+                    u_phone = st.text_input(f"연락처 ({i})", value=detected_phone, key=f"ph_{i}_{matched_machine}_{i}")
                 with col3:
                     d_idx = machine_options.index(matched_machine) if matched_machine in machine_options else machine_options.index("기본 기종")
-                    u_machine = st.selectbox(f"기종 ({i})", options=machine_options, index=d_idx, key=f"mc_{i}_{matched_machine}")
+                    u_machine = st.selectbox(f"기종 ({i})", options=machine_options, index=d_idx, key=f"mc_{i}_{matched_machine}_{i}")
                     
                 # 안내 문구 결합
                 how = st.session_state.custom_formats.get(u_machine, txt_default)
@@ -127,23 +127,22 @@ with tabs[0]:
                 else:
                     final_msg = f"안녕하세요 퍼스트 전산입니다.\n마감을 위해 마감 카운터 사진이 필요하여 연락드렸습니다.\n카운터 한장만 보내주시면 감사하겠습니다.\n\n▶ 기종: {u_machine}\n▶ 방법: {how}\n\n매번 번거롭게 해드려 죄송합니다."
                     
-                st.text_area(f"💬 미리보기 ({i})", value=final_msg, height=140, key=f"txt_{i}_{u_machine}")
+                st.write(f"💬 **최종 문구 미리보기 및 PC 복사 ({i})**")
+                # st.code는 구버전 스트림릿에서도 우측 상단 복사 단추를 기본 제공하여 에러가 없습니다.
+                st.code(final_msg, language=None)
                 
                 # 모바일 링크 파싱
                 encoded_msg = urllib.parse.quote(final_msg)
                 clean_phone = re.sub(r'[^0-9]', '', u_phone)
                 sms_url = f"sms:{clean_phone}?body={encoded_msg}"
                 
-                btn_col1, btn_col2 = st.columns([1, 1])
-                with btn_col1:
-                    st.copy_to_clipboard(final_msg, label=f"📋 PC용 복사: {u_name}")
-                with btn_col2:
-                    if clean_phone:
-                        b_style = "display: inline-block; width: 100%; text-align: center; padding: 0.45rem; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 7px; font-weight: bold; font-size: 14px;"
-                        html_btn = f'<a href="{sms_url}" target="_self" style="{b_style}">💬 갤럭시 전용: {u_name} 문자전송</a>'
-                        st.markdown(html_btn, unsafe_allow_html=True)
-                    else:
-                        st.write("⚠️ 연락처 없음")
+                if clean_phone:
+                    # 클릭 시 모바일 문자앱으로 즉시 연동되는 큰 버튼 스타일링
+                    b_style = "display: block; width: 100%; text-align: center; padding: 0.6rem; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; margin-top: 5px;"
+                    html_btn = f'<a href="{sms_url}" target="_self" style="{b_style}">💬 모바일 전용: {u_name}님께 즉시 문자보내기</a>'
+                    st.markdown(html_btn, unsafe_allow_html=True)
+                else:
+                    st.warning("⚠️ 추출된 연락처가 없습니다. 직접 입력하시면 전송 버튼이 활성화됩니다.")
                 st.markdown("---")
 
 with tabs[1]:
