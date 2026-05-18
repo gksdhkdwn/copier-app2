@@ -89,7 +89,7 @@ txt_default = (
     "문자나 카톡으로 발송 부탁드립니다."
 )
 
-# 3. 안전한 세션 독립 구조 세팅 (가로 잘림 원천 차단형)
+# 3. 안전한 세션 독립 구조 세팅
 if "custom_formats" not in st.session_state:
     st.session_state.custom_formats = {}
     st.session_state.custom_formats["N500"] = txt_sindo
@@ -196,7 +196,7 @@ with tabs[0]:
                     p_matches[0] if p_matches else ""
                 )
                 
-                # 업체명 추출
+                # 업체명 추출 (가로폭 압축 및 콜론 오류 완전 해결)
                 lines = [
                     l.strip() for l in block.split('\n') 
                     if l.strip()
@@ -209,4 +209,21 @@ with tabs[0]:
                         
                 if lines and len(lines) > 1 and has_bracket:
                     detected_name = lines[1]
-                elif lines
+                elif lines:
+                    detected_name = lines[0]
+                else:
+                    detected_name = "거래처 확인 바람"
+                
+                # 기종 자동 매칭
+                matched_machine = "기본 기종"
+                block_lower = block.lower()
+                
+                if "9201" in block_lower:
+                    matched_machine = "X-9201"
+                elif "3220" in block_lower:
+                    matched_machine = "X3220NR"
+                elif "sl-" in block_lower:
+                    matched_machine = "SL-"
+                else:
+                    for k in machine_options:
+                        chk_k = k not in
