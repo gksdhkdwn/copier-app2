@@ -42,45 +42,4 @@ if "custom_formats" not in st.session_state:
         "X3220NR": txt_x3220, "SL-": txt_samsung, "기본 기종": txt_default
     }
 
-tabs = st.tabs(["📝 마감 문자 대량 작성", "⚙️ 기종별 카운터 방법 사전"])
-
-with tabs[0]:
-    raw_text = st.text_area(
-        "카톡방에서 복사한 내용을 여기에 통째로 붙여넣으세요:", 
-        height=250
-    )
-    
-    if raw_text:
-        raw_blocks = re.split(r'(\[.*?\]|【.*?】)', raw_text)
-        
-        blocks = []
-        current_block = ""
-        
-        for part in raw_blocks:
-            if re.match(r'(\[.*?\]|【.*?】)', part):
-                if current_block.strip():
-                    blocks.append(current_block.strip())
-                current_block = part
-            else:
-                current_block += part
-        if current_block.strip():
-            blocks.append(current_block.strip())
-            
-        valid_blocks = [b.strip() for b in blocks if len(b.strip()) > 5]
-        
-        if not valid_blocks:
-            valid_blocks = [raw_text.strip()]
-
-        st.subheader(f"🔍 자동 생성된 마감 문자 목록 (총 {len(valid_blocks)}건)")
-        
-        machine_options = list(st.session_state.custom_formats.keys())
-        
-        for i, block in enumerate(valid_blocks, 1):
-            with st.container():
-                phone_matches = re.findall(r'01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}', block)
-                detected_phone = phone_matches[0] if phone_matches else "연락처 없음"
-                
-                lines = [l.strip() for l in block.split('\n') if l.strip()]
-                detected_name = "거래처 확인 바람"
-                if lines:
-                    if re.match(r'(\[.*?\]|【.*?】)', lines[0]) and len
+tabs = st.tabs(
