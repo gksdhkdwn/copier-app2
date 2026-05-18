@@ -51,7 +51,6 @@ with tabs[0]:
     )
     
     if raw_text:
-        # 대괄호([])나 【】 기준으로 거래처 블록 쪼개기
         raw_blocks = re.split(r'(\[.*?\]|【.*?】)', raw_text)
         
         blocks = []
@@ -67,73 +66,21 @@ with tabs[0]:
         if current_block.strip():
             blocks.append(current_block.strip())
             
-        if len(blocks) <= 1:
-            blocks = [raw_text.strip()]
+        valid_blocks = [b.strip() for b in blocks if len(b.strip()) > 5]
+        
+        if not valid_blocks:
+            valid_blocks = [raw_text.strip()]
 
-        st.subheader(f"🔍 자동 생성된 마감 문자 목록 (총 {len(blocks)}건)")
+        st.subheader(f"🔍 자동 생성된 마감 문자 목록 (총 {len(valid_blocks)}건)")
         
         machine_options = list(st.session_state.custom_formats.keys())
         
-        for i, block in enumerate(blocks, 1):
-            if not block.strip():
-                continue
-                
+        for i, block in enumerate(valid_blocks, 1):
             with st.container():
-                # 휴대폰 번호 추출 (하이픈 제거하고 숫자만 매칭하는 패턴까지 유연하게 처리)
                 phone_matches = re.findall(r'01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}', block)
                 detected_phone = phone_matches[0] if phone_matches else "연락처 없음"
                 
-                # 거래처명 추출 (첫 줄에서 지역구 제외하고 추출 시도)
                 lines = [l.strip() for l in block.split('\n') if l.strip()]
                 detected_name = "거래처 확인 바람"
                 if lines:
-                    if re.match(r'(\[.*?\]|【.*?】)', lines[0]) and len(lines) > 1:
-                        detected_name = lines[1]
-                    else:
-                        detected_name = lines[0]
-                
-                # 기종 자동 매칭 로직
-                matched_machine = "기본 기종"
-                block_lower = block.lower()
-                
-                if "x3220" in block_lower:
-                    matched_machine = "X3220NR"
-                elif "sl-" in block_lower:
-                    matched_machine = "SL-"
-                else:
-                    for k in machine_options:
-                        if k not in ["기본 기종", "X3220NR", "SL-"] and k.lower() in block_lower:
-                            matched_machine = k
-                            break
-                
-                # 3단 UI 레이아웃 구성
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col1:
-                    u_name = st.text_input(f"업체명 ({i})", value=detected_name, key=f"nm_{i}")
-                with col2:
-                    u_phone = st.text_input(f"고객 연락처 ({i})", value=detected_phone, key=f"ph_{i}")
-                with col3:
-                    default_idx = machine_options.index(matched_machine) if matched_machine in machine_options else machine_options.index("기본 기종")
-                    u_machine = st.selectbox(f"복사기 기종 ({i})", options=machine_options, index=default_idx, key=f"mc_{i}")
-                
-                how_to_print = st.session_state.custom_formats.get(u_machine, txt_default)
-                
-                # 최종 전송 문구 포맷 조립
-                if "안녕하세요" in how_to_print or "사용량확인차" in how_to_print:
-                    final_msg = f"{how_to_print}\n(기종: {u_machine})\n매번 번거롭게 해드려 죄송합니다."
-                else:
-                    final_msg = (
-                        f"안녕하세요 퍼스트 전산입니다.\n"
-                        f"마감을 위해 마감 카운터 사진이 필요하여 연락드렸습니다.\n"
-                        f"카운터 한장만 보내주시면 감사하겠습니다.\n\n"
-                        f"▶ 기종: {u_machine}\n"
-                        f"▶ 방법: {how_to_print}\n\n"
-                        f"매번 번거롭게 해드려 죄송합니다."
-                    )
-                
-                st.text_area(f"💬 최종 발송 문구 미리보기 ({i})", value=final_msg, height=140, key=f"txt_{i}")
-                st.markdown("---")
-
-with tabs[1]:
-    st.subheader("⚙️ 등록된 퍼스트전산 기종별 사전 리스트")
-    machine_items = list(st.session_state.custom_formats.items())
+                    if re.match(r'(\[.*?\]|【.*?】)', lines[0]) and len
