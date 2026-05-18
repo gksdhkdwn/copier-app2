@@ -38,20 +38,107 @@ with tabs[0]:
     )
     
     if raw_text:
+        # 하이픈 포함 010 번호 추출 정규식 보완
         phone_pattern = r'(01[016789][-.\s]?\d{3,4}[-.\s]?\d{4})'
-        blocks = []
-        matches = list(re.finditer(phone_pattern, raw_text))
         
-        start_idx = 0
-        for match in matches:
-            end_idx = match.end()
-            block_text = raw_text[start_idx:end_idx].strip()
-            if block_text:
-                blocks.append(block_text)
-            start_idx = end_idx
+        # [송파구], 【수도권】 같은 지역 대괄호 기준으로 덩어리를 1차 분리해봅니다.
+        # 만약 대괄호가 없으면 기존처럼 폰번호 기준으로 분리합니다.
+        raw_blocks = re.split(r'(\[.*?\]|【.*?】)', raw_text)
+        
+        blocks = []
+        current_block = ""
+        
+        for part in raw_blocks:
+            if re.match(r'(\[.*?\]|【.*?】)', part):
+                if current_block.strip():
+                    blocks.append(current_block.strip())
+                current_block = part
+            else:
+                current_block += part
+        if current_block.strip():
+            blocks.append(current_block.strip())
             
-        if not blocks and raw_text.strip():
+        # 만약 대괄호 기준으로 분리가 전혀 안 되었다면 원본 텍스트를 통째로 하나로 처리
+        if len(blocks) <= 1:
             blocks = [raw_text.strip()]
-        elif start_idx < len(raw_text) and raw_text[start_idx:].strip():
-            if blocks:
-                blocks[-1] = blocks
+
+        st.subheader(f"🔍 자동 생성된 마감 문자 목록 (총 {len(blocks)}건)")
+        
+        for i, block in enumerate(blocks, 1):
+            if not block.strip():
+                continue
+                
+            with st.container():
+                # 블록 내에서 휴대폰 번호 찾기 (하이픈 있어도 매칭 가능)
+                phone_match = re.search(phone_pattern, block)
+                phone = phone_match.group(1) if phone_match else "연락처 없음"
+                
+                # 대소문자 상관없이 기종 포함 여부 체크 (예: SL-X3220NR 안에 X3220이 있는지 감지)
+                matched_machine = "기본 기종"
+                for k in st.session_state.custom_formats.keys():
+                    if k != "기본 기종" and k.lower() in block.lower():
+                        matched_machine = k
+                        break
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    u_phone = st.text_input(
+                        f"수신 연락처 ({i})", 
+                        value=phone, 
+                        key=f"phone_{i}"
+                    )
+                with col2:
+                    u_machine = st.selectbox(
+                        f"자동 인식된 기종 ({i})", 
+                        options=list(st.session_state.custom_formats.keys()), 
+                        index=list(st.session_state.custom_formats.keys()).index(matched_machine),
+                        key=f"mach_{i}"
+                    )
+                
+                formats_dict = st.session_state.custom_formats
+                how_to_print = formats_dict.get(u_machine, formats_dict["기본 기종"])
+                
+                if "안녕하세요" in how_to_print or "안녕하십니까" in how_to_print:
+                    final_msg = f"{how_to_print}\n- 기종: {u_machine}\n매번 번거롭게 해드려 죄송합니다."
+                else:
+                    final_msg = (
+                        f"안녕하세요 퍼스트 전산입니다\n"
+                        f"마감을 위해 마감 카운터 사진이 필요하여 연락드렸습니다\n"
+                        f"카운터 한장만 보내주시면 감사하겠습니다\n"
+                        f"({u_machine}) - {how_to_print}\n"
+                        f"매번 번거롭게 해드려 죄송합니다"
+                    )
+                
+                st.text_area(
+                    f"💬 최종 복사용 문구 미리보기 ({i})", 
+                    value=final_msg, 
+                    height=130, 
+                    key=f"msg_{i}"
+                )
+                st.markdown("---")
+
+with tabs[1]:
+    st.subheader("⚙️ 등록된 퍼스트전산 기종별 사전 리스트")
+    
+    for machine_type, method_text in list(st.session_state.custom_formats.items()):
+        col_k, col_v = st.columns([1, 3])
+        with col_k:
+            st.markdown(f"**{machine_type}**")
+        with col_v:
+            st.session_state.custom_formats[machine_type] = st.text_area(
+                f"'{machine_type}' 확인 방법", 
+                value=method_text, 
+                key=f"setting_{machine_type}", 
+                height=70
+            )
+            
+    st.markdown("#### ➕ 추후 새로운 기종이 늘어나면 등록하는 곳")
+    new_mach = st.text_input("새로운 기종 이름 입력 (예: C2260)")
+    new_method = st.text_area(
+        "해당 기종의 카운터 확인 방법 설명", 
+        value="[메뉴] 버튼 클릭 후 화면상의 카운터를 확인하세요."
+    )
+    if st.button("사전에 기종 추가하기"):
+        if new_mach:
+            st.session_state.custom_formats[new_mach] = new_method
+            st.rerun()
