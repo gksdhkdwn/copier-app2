@@ -83,28 +83,4 @@ with tabs[0]:
                     )
                 
                 # 선택된 기종의 추출 방법 가져오기
-                how_to_print = st.session_state.custom_formats.get(u_machine, st.session_state.custom_formats["기본 기종"])
-                
-                # 사장님 요청 통합 양식 조립 (ECOSYS나 리코 등 주신 설명 자체에 인사말이 중복된 경우는 자연스럽게 결합되도록 대응)
-                if "안녕하세요" in how_to_print or "안녕하십니까" in how_to_print:
-                    # 기종별 멘트 자체에 인사말이 이미 포함되어 있는 경우 통째로 출력
-                    final_msg = f"{how_to_print}\n- 기종: {u_machine}\n매번 번거롭게 해드려 죄송합니다."
-                else:
-                    # 기본 뼈대 양식에 결합
-                    final_msg = (
-                        f"안녕하세요 퍼스트 전산입니다\n"
-                        f"마감을 위해 마감 카운터 사진이 필요하여 연락드렸습니다\n"
-                        f"카운터 한장만 보내주시면 감사하겠습니다\n"
-                        f"({u_machine}) - {how_to_print}\n"
-                        f"매번 번거롭게 해드려 죄송합니다"
-                    )
-                
-                # 최종 완성창 (오른쪽 위 복사 아이콘으로 바로 긁어갈 수 있음)
-                st.text_area(f"💬 최종 복사용 문구 미리보기 ({i})", value=final_msg, height=130, key=f"msg_{i}")
-                st.markdown("---")
-
-with tabs[1]:
-    st.subheader("⚙️ 등록된 퍼스트전산 기종별 사전 리스트")
-    st.write("사장님이 넘겨주신 10대 기종의 데이터가 이미 완벽하게 탑재되어 있습니다. 필요시 내용을 수정하시거나 아래에서 새 기종을 추가하세요.")
-    
-    for machine_type, method_text in list(st.session_state.custom_
+                how_to_print = st.session_state.custom_formats.get(u_machine, st
