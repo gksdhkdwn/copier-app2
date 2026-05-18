@@ -3,9 +3,9 @@ import re
 
 st.set_page_config(page_title="퍼스트전산 마감 도우미", page_icon="📱", layout="wide")
 st.title("퍼스트전산 마감 도우미 📱")
-st.caption("카톡 내용을 복사해 넣으면 업체명 없이, 등록된 10대 기종 사전과 매칭하여 정확한 마감 문자를 대량 생성합니다.")
+st.caption("카톡 내용을 복사해 넣으면 등록된 10대 기종 사전과 매칭하여 정확한 마감 문자를 대량 생성합니다.")
 
-# 세션 상태 초기화 (사장님이 주신 정확한 기종별 데이터 입력)
+# 세션 상태 초기화 (기종별 데이터)
 if "custom_formats" not in st.session_state:
     st.session_state.custom_formats = {
         "D410": "기기 메뉴버튼 → 화면 윗쪽 카운터 버튼 → 목록인쇄 → 시작 누르시면 출력물 하나 나옵니다. 인쇄물 캡쳐본 문자로 부탁드립니다.",
@@ -30,12 +30,10 @@ tabs = st.tabs(["📝 마감 문자 대량 작성", "⚙️ 기종별 카운터 
 with tabs[0]:
     raw_text = st.text_area(
         "카톡방에서 복사한 내용을 여기에 통째로 붙여넣으세요:", 
-        height=250, 
-        placeholder="여기에 여러 업체의 카톡 정보를 한 번에 붙여넣으시면 자동으로 쪼개집니다."
+        height=250
     )
     
     if raw_text:
-        # 1. 휴대폰 번호를 기준으로 각 업체의 텍스트 덩어리를 분리
         phone_pattern = r'(01[016789][-.\s]?\d{3,4}[-.\s]?\d{4})'
         blocks = []
         matches = list(re.finditer(phone_pattern, raw_text))
@@ -56,31 +54,16 @@ with tabs[0]:
 
         st.subheader(f"🔍 자동 생성된 마감 문자 목록 (총 {len(blocks)}건)")
         
-        # 2. 각 업체 덩어리별로 매칭 및 문자 조립
         for i, block in enumerate(blocks, 1):
             with st.container():
-                # 연락처 추출
                 phone_match = re.search(phone_pattern, block)
                 phone = phone_match.group(1) if phone_match else "연락처 없음"
                 
-                # 대소문자 상관없이 카톡방 텍스트에 사장님의 기종 이름이 들어있는지 탐색
                 matched_machine = "기본 기종"
                 for k in st.session_state.custom_formats.keys():
                     if k.lower() in block.lower():
                         matched_machine = k
                         break
                 
-                # 수동 보정용 칸 배치
                 col1, col2 = st.columns(2)
-                with col1:
-                    u_phone = st.text_input(f"수신 연락처 ({i})", value=phone, key=f"phone_{i}")
-                with col2:
-                    u_machine = st.selectbox(
-                        f"자동 인식된 기종 ({i}) - 틀렸을 경우 변경 가능", 
-                        options=list(st.session_state.custom_formats.keys()), 
-                        index=list(st.session_state.custom_formats.keys()).index(matched_machine) if matched_machine in st.session_state.custom_formats else 0, 
-                        key=f"mach_{i}"
-                    )
-                
-                # 선택된 기종의 추출 방법 가져오기
-                how_to_print = st.session_state.custom_formats.get(u_machine, st
+                with col
