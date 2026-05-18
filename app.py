@@ -1,11 +1,15 @@
 import streamlit as st
 import re
 
-st.set_page_config(page_title="퍼스트전산 마감 도우미", page_icon="📱", layout="wide")
+st.set_page_config(
+    page_title="퍼스트전산 마감 도우미", 
+    page_icon="📱", 
+    layout="wide"
+)
 st.title("퍼스트전산 마감 도우미 📱")
-st.caption("카톡 내용을 복사해 넣으면 등록된 10대 기종 사전과 매칭하여 정확한 마감 문자를 대량 생성합니다.")
+st.caption("카톡 내용을 복사해 넣으면 정확한 마감 문자를 대량 생성합니다.")
 
-# 세션 상태 초기화 (기종별 데이터)
+# 기종별 데이터 기본 세팅
 if "custom_formats" not in st.session_state:
     st.session_state.custom_formats = {
         "D410": "기기 메뉴버튼 → 화면 윗쪽 카운터 버튼 → 목록인쇄 → 시작 누르시면 출력물 하나 나옵니다. 인쇄물 캡쳐본 문자로 부탁드립니다.",
@@ -50,20 +54,4 @@ with tabs[0]:
             blocks = [raw_text.strip()]
         elif start_idx < len(raw_text) and raw_text[start_idx:].strip():
             if blocks:
-                blocks[-1] = blocks[-1] + "\n" + raw_text[start_idx:].strip()
-
-        st.subheader(f"🔍 자동 생성된 마감 문자 목록 (총 {len(blocks)}건)")
-        
-        for i, block in enumerate(blocks, 1):
-            with st.container():
-                phone_match = re.search(phone_pattern, block)
-                phone = phone_match.group(1) if phone_match else "연락처 없음"
-                
-                matched_machine = "기본 기종"
-                for k in st.session_state.custom_formats.keys():
-                    if k.lower() in block.lower():
-                        matched_machine = k
-                        break
-                
-                col1, col2 = st.columns(2)
-                with col
+                blocks[-1] = blocks
