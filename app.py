@@ -5,7 +5,7 @@ import urllib.parse
 # 1. 페이지 기본 설정
 st.set_page_config(page_title="퍼스트전산 마감 도우미", page_icon="📱", layout="wide")
 st.title("퍼스트전산 마감 도우미 📱")
-st.caption("카톡 내용을 복사해 넣으면 번호가 적힌 거래처만 정확하게 인식하여 마감 문자를 대량 생성합니다.")
+st.caption("카톡 내용을 복사해 넣으면 번호가 적힌 거래처만 정확하게 인식하여 마감 문자를 대량 생성합니다. (복수 번호 지원)")
 
 # 핸드폰에서 손가락이 갇히지 않도록 내부 스크롤을 원천 차단하고 높이를 완전 자동 확장하는 CSS
 st.markdown(
@@ -51,17 +51,16 @@ if "custom_formats" not in st.session_state:
         "X-9201": txt_x3220, "SL-": txt_samsung, "기본 기종": txt_default
     }
 
-# 입력창 초기화용 안전 함수 정의 (팅김 절대 없음)
+# 입력창 초기화용 안전 함수 정의
 def clear_text_area():
     st.session_state["text_input_area"] = ""
 
-# 최종 텍스트 바인딩 (안전 키값 지정)
+# 최종 텍스트 바인딩
 raw_text = st.text_area("카톡 내용 붙여넣기:", key="text_input_area")
 
 # 4. 버튼 영역
 col_btn1, col_btn2, _ = st.columns([1.5, 1.5, 5])
 with col_btn1:
-    # 💡 [핵심 수정] st.rerun()을 쓰지 않고 스트림릿 고유 기능(on_click)으로 내부 메모리만 조용히 비우는 방식
     st.button("🗑️ 입력 내용 전체 초기화", on_click=clear_text_area, use_container_width=True)
         
 with col_btn2:
@@ -96,8 +95,17 @@ if raw_text and raw_text.strip():
     
     sms_data_list = []
     for i, block in enumerate(valid_blocks, 1):
+        # 💡 [변경 포인트] 블록 내의 모든 연락처 패턴 추출 (중복 제거)
         p_matches = re.findall(r'01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}', block)
-        detected_phone = p_matches[0] if p_matches else ""
+        # 하이픈 제거하여 깔끔하게 정리한 번호 리스트 생성
+        clean_phones = []
+        for p in p_matches:
+            c_p = re.sub(r'[^0-9]', '', p)
+            if c_p not in clean_phones:
+                clean_phones.append(c_p)
+        
+        # 화면에 보여주기 위한 기본 문자열 콤마 조합
+        detected_phone_str = ", ".join(clean_phones) if clean_phones else ""
         
         lines = [l.strip() for l in block.split('\n') if l.strip()]
         detected_name = "거래처 확인 바람"
@@ -121,19 +129,53 @@ if raw_text and raw_text.strip():
         
         # 고정 키값 바인딩
         if f"final_nm_{i}" not in st.session_state: st.session_state[f"final_nm_{i}"] = detected_name
-        if f"final_ph_{i}" not in st.session_state: st.session_state[f"final_ph_{i}"] = detected_phone
+        if f"final_ph_{i}" not in st.session_state: st.session_state[f"final_ph_{i}"] = detected_phone_str
         if f"final_mc_{i}" not in st.session_state: st.session_state[f"final_mc_{i}"] = matched_machine
 
         sms_data_list.append({"index": i, "block_raw": block})
 
     st.subheader(f"🚀 모바일 즉시 전송 버튼 목록 (총 {len(sms_data_list)}건)")
-    st.info("💡 아래 업체 버튼을 누르면 내용 최종 확인 팝업창이 나타납니다.")
+    st.info("💡 아래 업체 버튼을 누르면 내용 최종 확인 및 번호 선택 팝업창이 나타납니다.")
     
+    # 💡 팝업을 띄울 때 쓸 다이얼로그 함수 정의
+    @st.dialog("📱 문자 전송 대상 및 내용 확인")
+    def show_send_popup(name, phone_input, msg):
+        st.warning("⚠️ 수신 번호를 확인 및 선택 후 하단의 최종 전송을 눌러주세요.")
+        
+        # 콤마나 공백으로 분리하여 번호 목록 추출
+        nums = [n.strip() for n in re.split(r'[\s,]+', phone_input) if n.strip()]
+        
+        selected_number = ""
+        if len(nums) > 1:
+            st.info(f"💡 번호가 {len(nums)}개 발견되었습니다. 발송할 번호를 선택해 주세요:")
+            # 라디오 버튼으로 고를 수 있게 제공
+            selected_number = st.radio("수신 연락처 선택", options=nums, index=0)
+        elif len(nums) == 1:
+            st.write(f"**수신 번호:** {nums[0]}")
+            selected_number = nums[0]
+        else:
+            st.error("❌ 등록된 수신 번호가 없습니다. 하단에서 번호를 입력해 주세요.")
+        
+        st.write("**📱 최종 전송 문구 미리보기:**")
+        st.code(msg, language=None)
+        
+        if selected_number:
+            # 안전하게 하이픈 등 숫자 이외의 문자 제거
+            target_num = re.sub(r'[^0-9]', '', selected_number)
+            st.markdown(
+                f'<a href="sms:{target_num}?body={urllib.parse.quote(msg)}" target="_self" '
+                f'style="display: block; width: 100%; text-align: center; padding: 0.8rem; '
+                f'background-color: #00CC66; color: white; text-decoration: none; '
+                f'border-radius: 8px; font-weight: bold; font-size: 18px; margin-top: 15px;">'
+                f'✅ 확인완료: [{target_num}] 번호로 즉시 보내기</a>', 
+                unsafe_allow_html=True
+            )
+
     btn_cols = st.columns(4)
     for idx, s_info in enumerate(sms_data_list):
         i = s_info["index"]
         cur_name = st.session_state.get(f"nm_{i}_first", st.session_state[f"final_nm_{i}"])
-        cur_phone = re.sub(r'[^0-9]', '', st.session_state.get(f"ph_{i}_first", st.session_state[f"final_ph_{i}"]))
+        cur_phone_str = st.session_state.get(f"ph_{i}_first", st.session_state[f"final_ph_{i}"])
         cur_machine = st.session_state.get(f"mc_{i}_first", st.session_state[f"final_mc_{i}"])
         
         cur_how = st.session_state.custom_formats.get(cur_machine, txt_default)
@@ -144,21 +186,13 @@ if raw_text and raw_text.strip():
 
         col_target = btn_cols[idx % 4]
         with col_target:
-            if cur_phone:
-                if st.button(f"💬 {cur_name} 발송", key=f"popup_btn_{i}", use_container_width=True):
-                    st.dialog(f"📱 {cur_name}님 문자 최종 확인")(lambda name=cur_name, phone=cur_phone, msg=cur_msg: (
-                        st.warning("⚠️ 아래 문구가 맞는지 확인 후 하단의 최종 전송을 눌러주세요."),
-                        st.write(f"**수신 번호:** {phone}"),
-                        st.code(msg, language=None),
-                        st.markdown(
-                            f'<a href="sms:{phone}?body={urllib.parse.quote(msg)}" target="_self" '
-                            f'style="display: block; width: 100%; text-align: center; padding: 0.8rem; '
-                            f'background-color: #00CC66; color: white; text-decoration: none; '
-                            f'border-radius: 8px; font-weight: bold; font-size: 18px; margin-top: 15px;">'
-                            f'✅ 확인완료: 지금 바로 문자 앱으로 보내기</a>', 
-                            unsafe_allow_html=True
-                        )
-                    ))()
+            if cur_phone_str.strip():
+                # 💡 여러 개의 번호가 감지된 경우 버튼에 (번호 여러개) 표시 추가하여 한눈에 보이기
+                phone_count = len([n for n in re.split(r'[\s,]+', cur_phone_str) if n.strip()])
+                btn_label = f"💬 {cur_name} ({phone_count}개)" if phone_count > 1 else f"💬 {cur_name} 발송"
+                
+                if st.button(btn_label, key=f"popup_btn_{i}", use_container_width=True):
+                    show_send_popup(cur_name, cur_phone_str, cur_msg)
             else:
                 st.button(f"❌ {cur_name} (번호없음)", disabled=True, use_container_width=True, key=f"disabled_btn_{i}")
 
@@ -168,9 +202,9 @@ if raw_text and raw_text.strip():
     for s_info in sms_data_list:
         i = s_info["index"]
         with st.container():
-            col1, col2, col3 = st.columns([2, 1, 1])
+            col1, col2, col3 = st.columns([2, 1.5, 1])
             with col1: u_name = st.text_input(f"업체명 ({i})", value=st.session_state[f"final_nm_{i}"], key=f"nm_{i}_first")
-            with col2: u_phone = st.text_input(f"연락처 ({i})", value=st.session_state[f"final_ph_{i}"], key=f"ph_{i}_first")
+            with col2: u_phone = st.text_input(f"연락처 ({i}) - 여러개는 쉼표(,) 구분", value=st.session_state[f"final_ph_{i}"], key=f"ph_{i}_first")
             with col3:
                 d_idx = machine_options.index(st.session_state[f"final_mc_{i}"]) if st.session_state[f"final_mc_{i}"] in machine_options else machine_options.index("기본 기종")
                 u_machine = st.selectbox(f"기종 ({i})", options=machine_options, index=d_idx, key=f"mc_{i}_first")
