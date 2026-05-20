@@ -47,110 +47,29 @@ if "custom_formats" not in st.session_state:
         "X-9201": txt_x3220, "SL-": txt_samsung, "기본 기종": txt_default
     }
 
+# 초기화 처리를 위한 세션 상태 등록
+if "input_text" not in st.session_state:
+    st.session_state.input_text = ""
+if "analyze_clicked" not in st.session_state:
+    st.session_state.analyze_clicked = False
+
 # 4. 상단 탭 구성
 tabs = st.tabs(["📝 마감 문자 대량 작성", "⚙️ 기종별 카운터 방법 사전"])
 
 with tabs[0]:
-    raw_text = st.text_area("카톡 내용 붙여넣기:", height=250)
+    # 컨트롤 버튼 레이아웃
+    col_btn1, col_btn2, _ = st.columns([1.5, 1.5, 5])
     
-    if raw_text:
-        raw_blocks = re.split(r'(\[.*?\]|【.*?】)', raw_text)
-        blocks = []
-        current_block = ""
-        for part in raw_blocks:
-            if re.match(r'(\[.*?\]|【.*?】)', part):
-                if current_block.strip():
-                    blocks.append(current_block.strip())
-                current_block = part
-            else:
-                current_block += part
-        if current_block.strip():
-            blocks.append(current_block.strip())
+    with col_btn1:
+        if st.button("🗑️ 입력 내용 전체 초기화", use_container_width=True):
+            st.session_state.input_text = ""
+            st.session_state.analyze_clicked = False
+            st.rerun()
             
-        valid_blocks = [b.strip() for b in blocks if len(b.strip()) > 5]
-        if not valid_blocks:
-            valid_blocks = [raw_text.strip()]
-            
-        st.subheader(f"🔍 목록 (총 {len(valid_blocks)}건)")
-        machine_options = list(st.session_state.custom_formats.keys())
-        exclude_machines = ["기본 기종", "X3220NR", "X-9201", "SL-"]
-        
-        for i, block in enumerate(valid_blocks, 1):
-            with st.container():
-                # 연락처 추출
-                p_matches = re.findall(r'01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}', block)
-                detected_phone = p_matches[0] if p_matches else ""
-                
-                # 업체명 추출
-                lines = [l.strip() for l in block.split('\n') if l.strip()]
-                has_bracket = False
-                if lines and ('[' in lines[0] or '【' in lines[0]):
-                    has_bracket = True
-                
-                if lines and len(lines) > 1 and has_bracket:
-                    detected_name = lines[1]
-                elif lines:
-                    detected_name = lines[0]
-                else:
-                    detected_name = "거래처 확인 바람"
-                    
-                # 기종 자동 매칭
-                matched_machine = "기본 기종"
-                block_lower = block.lower()
-                if "9201" in block_lower:
-                    matched_machine = "X-9201"
-                elif "3220" in block_lower:
-                    matched_machine = "X3220NR"
-                elif "sl-" in block_lower:
-                    matched_machine = "SL-"
-                else:
-                    for k in machine_options:
-                        if k not in exclude_machines and k.lower() in block_lower:
-                            matched_machine = k
-                            break
-                            
-                # 입력 UI 배치
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col1:
-                    u_name = st.text_input(f"업체명 ({i})", value=detected_name, key=f"nm_{i}_{matched_machine}_{i}")
-                with col2:
-                    u_phone = st.text_input(f"연락처 ({i})", value=detected_phone, key=f"ph_{i}_{matched_machine}_{i}")
-                with col3:
-                    d_idx = machine_options.index(matched_machine) if matched_machine in machine_options else machine_options.index("기본 기종")
-                    u_machine = st.selectbox(f"기종 ({i})", options=machine_options, index=d_idx, key=f"mc_{i}_{matched_machine}_{i}")
-                    
-                # 안내 문구 결합
-                how = st.session_state.custom_formats.get(u_machine, txt_default)
-                
-                if "안녕하세요" in how or "사용량확인차" in how:
-                    final_msg = f"{how}\n(기종: {u_machine})\n매번 번거롭게 해드려 죄송합니다."
-                else:
-                    final_msg = f"안녕하세요 퍼스트 전산입니다.\n마감을 위해 마감 카운터 사진이 필요하여 연락드렸습니다.\n카운터 한장만 보내주시면 감사하겠습니다.\n\n▶ 기종: {u_machine}\n▶ 방법: {how}\n\n매번 번거롭게 해드려 죄송합니다."
-                    
-                st.write(f"💬 **최종 문구 미리보기 및 PC 복사 ({i})**")
-                # st.code는 구버전 스트림릿에서도 우측 상단 복사 단추를 기본 제공하여 에러가 없습니다.
-                st.code(final_msg, language=None)
-                
-                # 모바일 링크 파싱
-                encoded_msg = urllib.parse.quote(final_msg)
-                clean_phone = re.sub(r'[^0-9]', '', u_phone)
-                sms_url = f"sms:{clean_phone}?body={encoded_msg}"
-                
-                if clean_phone:
-                    # 클릭 시 모바일 문자앱으로 즉시 연동되는 큰 버튼 스타일링
-                    b_style = "display: block; width: 100%; text-align: center; padding: 0.6rem; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; margin-top: 5px;"
-                    html_btn = f'<a href="{sms_url}" target="_self" style="{b_style}">💬 모바일 전용: {u_name}님께 즉시 문자보내기</a>'
-                    st.markdown(html_btn, unsafe_allow_html=True)
-                else:
-                    st.warning("⚠️ 추출된 연락처가 없습니다. 직접 입력하시면 전송 버튼이 활성화됩니다.")
-                st.markdown("---")
+    with col_btn2:
+        if st.button("🔍 마감 문자 변환하기", type="primary", use_container_width=True):
+            st.session_state.analyze_clicked = True
 
-with tabs[1]:
-    st.subheader("⚙️ 기종별 사전 리스트")
-    for machine_type in list(st.session_state.custom_formats.keys()):
-        method_text = st.session_state.custom_formats[machine_type]
-        col_k, col_v = st.columns([1, 3])
-        with col_k:
-            st.markdown(f"**{machine_type}**")
-        with col_v:
-            st.session_state.custom_formats[machine_type] = st.text_area(f"'{machine_type}' 설정", value=method_text, key=f"set_{machine_type}", height=80)
+    # 텍스트 에어리어 (세션 상태와 바인딩)
+    raw_text = st.text_area(
+        "
