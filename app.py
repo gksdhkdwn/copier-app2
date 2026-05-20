@@ -2,187 +2,160 @@ import streamlit as st
 import re
 import urllib.parse
 
-# 1. 페이지 기본 설정
-st.set_page_config(page_title="퍼스트전산 마감 도우미", page_icon="📱", layout="wide")
-st.title("퍼스트전산 마감 도우미 📱")
-st.caption("카톡 내용을 복사해 넣으면 번호가 적힌 거래처만 정확하게 인식하여 마감 문자를 대량 생성합니다.")
+# 1. 페이지 기본 설정 및 스타일 (와이드 모드)
+st.set_page_config(page_title="퍼스트전산 마감 도우미", layout="wide")
 
-# 핸드폰에서 손가락이 갇히지 않도록 내부 스크롤을 원천 차단하고 높이를 완전 자동 확장하는 CSS
-st.markdown(
-    """
+# 모바일 환경 대응 커스텀 CSS (텍스트 에어리아 스크롤 및 꽉 차는 버튼)
+st.markdown("""
     <style>
-    div[data-testid="stTextArea"] textarea {
-        overflow-y: hidden !important;
-        height: auto !important;
-        min-height: 200px !important;
-        max-height: none !important;
+    .stTextArea textarea {
+        font-size: 14px !important;
+    }
+    div.stButton > button {
+        width: 100% !important;
+        background-color: #25D366 !important;
+        color: white !important;
+        font-weight: bold !important;
+        border-radius: 8px !important;
+        padding: 10px !important;
     }
     </style>
-    """,
-    unsafe_allow_html=True
-)
+""", unsafe_allow_html=True)
 
-# 2. 안내 문구 기본값 정의
-txt_sindo = "기기 메뉴버튼 → 화면 윗쪽 카운터 버튼 → 목록인쇄 → 시작 누르시면 출력물 하나 나옵니다. 인쇄물 캡쳐본 문자로 부탁드립니다."
-txt_ecosys = "기기 화면 좌측 하단 시스템메뉴/카운터 버튼 누르신 후 → 리포트 → 리포트 인쇄 → 스테이터스페이지 인쇄 하시면 출력물이 나옵니다. 캡쳐 후 문자로 부탁드립니다."
-txt_305 = "1. 기계확인/사양설정 → 2. 리포트 → 프린터사용량 ok 누르신 후 리포트 캡쳐본 문자로 부탁드립니다."
-txt_5473 = "사용량확인차 문자남겼습니다 확인방법 - 장치설정 > 보고서 > 시스템 > 인쇄집계결과 > 예 > 확인 누르면 출력물 하나 나옵니다 출력물 사진찍어서 문자발송 부탁드립니다."
-txt_apeos = "기계확인 버튼 → 사용매수 확인 눌러서 일련번호와 현재사용매수 나온 화면 캡쳐 후 문자로 부탁드립니다."
-txt_5700 = "(오른쪽 위) 연장 표시 → 모든 설정 → (밑으로 내리고) 보고서 인쇄 → (밑으로) 프린터 설정 (4장 중에 3 페이지만 문자 보냅니다.)"
-txt_l5100 = "+ 누르면 Machine info 누르고 ok → Print settings ok 누른 후 go(시작버튼) 누르셔서 나오는 4장 중 3번째 장만 문자로 부탑드립니다."
-txt_ricoh = "사용자도구 클릭 → 카운터 클릭 → 카운터 목록인쇄클릭 (인쇄물 출력 후 발송 부탁드립니다.)"
-txt_5005 = "사양설정 > 리포트 > 기능설정리스트 확인 후 문자로 부탁드립니다."
-txt_x3220 = "기기 우측 버튼 보시면 카운터 누름 -> 화면 인쇄 버튼 클릭하여 확인 후 문자로 부탁드립니다."
-txt_samsung = "설정 → 왼쪽 쭉 내리다보면 리포트 누름 → 오른쪽 사용량 정보 클릭하여 확인 후 문자로 부탁드립니다."
-txt_default = "기기 화면의 카운터 메뉴에서 사용량 확인 후 사진 한 장만 문자나 카톡으로 발송 부탁드립니다."
+# 2. 고정된 기종별 카운터 안내 문구 데이터 (기본값 설정)
+DEFAULT_FORMATS = {
+    "D451 / D450": "화면 우측의 [카운터] 버튼을 누르신 후 화면에 나오는 [사용량 확인] 전체 화면을 촬영해 주세요.",
+    "X-9201 / X3220": "기기 조작부 우측 하단의 [카운터] 물리 버튼을 누르신 후 화면에 출력되는 카운터 정보를 촬영해 주세요.",
+    "MP-C2003 / MP 2554": "[사용자도구/카운터] 클릭 ➡️ 화면의 [카운터] 클릭 ➡️ [카운터 목록인쇄]를 눌러 출력된 인쇄물을 촬영해 주세요.",
+    "ECOSYS 시리즈": "기기 화면 좌측 하단 [시스템메뉴/카운터] ➡️ [리포트] ➡️ [리포트 인쇄] ➡️ [스테이터스페이지 인쇄] 후 출력물을 촬영해 주세요.",
+    "N500 / N501 / N600": "[메뉴] ➡️ [카운터] 버튼을 누르신 후 화면 전체를 촬영하여 보내주세요.",
+    "5700 카운터": "오른쪽 위 [연장] 표시 ➡️ [모든 설정] ➡️ [보고서 인쇄] ➡️ [프린터 설정] 출력 후 4장 중 3번째 페이지만 촬영해 주세요.",
+    "L5100 시리즈": "[+] 버튼 ➡️ [Machine Info] ➡️ [OK] ➡️ [Print Settings] ➡️ [OK] ➡️ [GO(시작)] 누른 후 3번째 장을 촬영해 주세요.",
+    "5005d": "[사양설정] ➡️ [리포트] ➡️ [기능설정리스트]를 눌러 출력된 화면을 촬영해 주세요."
+}
 
-# 3. 세션 상태 사전 초기화
+# 세션 상태에 사용자 정의 포맷이 없으면 기본값으로 초기화
 if "custom_formats" not in st.session_state:
-    st.session_state.custom_formats = {
-        "N500": txt_sindo, "N501": txt_sindo, "N502": txt_sindo, "N600": txt_sindo, "N601": txt_sindo, 
-        "D320": txt_sindo, "D400": txt_sindo, "D410": txt_sindo, "D420": txt_sindo, "D450": txt_sindo, 
-        "D460": txt_sindo, "D470": txt_sindo, "MA2100": txt_ecosys, "M5526": txt_ecosys, "M5521": txt_ecosys, 
-        "ECOSYS": txt_ecosys, "305": txt_305, "5473": txt_5473, "C2263": txt_apeos, "C2265": txt_apeos, 
-        "C2061": txt_apeos, "C3067": txt_apeos, "C2260": txt_apeos, "C2270": txt_apeos, "C2275": txt_apeos, 
-        "C3375": txt_apeos, "C4475": txt_apeos, "C5575": txt_apeos, "C2271": txt_apeos, "C2273": txt_apeos, 
-        "C3371": txt_apeos, "C3373": txt_apeos, "C3070": txt_apeos, "C3570": txt_apeos, "C4570": txt_apeos, 
-        "C5570": txt_apeos, "C7070": txt_apeos, "Apeos": txt_apeos, "5700": txt_5700, "L5100": txt_l5100, 
-        "2554": txt_ricoh, "C3003": txt_ricoh, "C4504": txt_ricoh, "5005": txt_5005, "X3220NR": txt_x3220, 
-        "X-9201": txt_x3220, "SL-": txt_samsung, "기본 기종": txt_default
-    }
+    st.session_state.custom_formats = DEFAULT_FORMATS.copy()
 
-# 입력창 초기화용 안전 함수 정의 (팅김 절대 없음)
-def clear_text_area():
-    st.session_state["text_input_area"] = ""
+st.title("📱 퍼스트전산 마감 도우미 (통합 발송 지원)")
 
-# 최종 텍스트 바인딩 (안전 키값 지정)
-raw_text = st.text_area("카톡 내용 붙여넣기:", key="text_input_area")
+# ⭐ 중요: 사장님이 말씀하신 "고칠 수 있는 뒤의 화면"을 탭 메뉴로 분리했습니다!
+tabs = st.tabs(["📋 마감 문자 작성", "⚙️ 기종별 사전 리스트"])
 
-# 4. 버튼 영역
-col_btn1, col_btn2, _ = st.columns([1.5, 1.5, 5])
-with col_btn1:
-    # 💡 [핵심 수정] st.rerun()을 쓰지 않고 스트림릿 고유 기능(on_click)으로 내부 메모리만 조용히 비우는 방식
-    st.button("🗑️ 입력 내용 전체 초기화", on_click=clear_text_area, use_container_width=True)
-        
-with col_btn2:
-    analyze_clicked = st.button("🔍 마감 문자 변환하기", type="primary", use_container_width=True)
-
-st.markdown("---")
-
-# 5. 분석 로직 가동
-if raw_text and raw_text.strip():
-    split_pattern = r'((?<=\n)\d+(?:\s*,\s*)\d*[A-Z]*)|(^\d+(?:\s*,\s*)\d*[A-Z]*)'
-    raw_parts = re.split(split_pattern, raw_text)
+# --- TAB 1: 마감 문자 작성 화면 ---
+with tabs[0]:
+    st.subheader("1. 카카오톡 마감 정보 입력")
+    raw_text = st.text_area(
+        "카톡방에서 복사한 마감 명단을 아래에 붙여넣어 주세요.",
+        placeholder="여기에 복사한 텍스트를 붙여넣으세요...",
+        height=200
+    )
     
-    blocks, current_block = [], ""
-    for part in raw_parts:
-        if part is None:
-            continue
-        if re.match(r'^\d+(?:\s*,\s*)', part.strip()):
-            if current_block.strip():
-                blocks.append(current_block.strip())
-            current_block = part
+    # 입력 내용 전체 초기화 기능
+    if st.button("🗑️ 입력 내용 전체 초기화", key="btn_clear_all"):
+        st.rerun()
+
+    if raw_text.strip():
+        st.subheader("2. 추출 및 통합 문자 발송 목록")
+        
+        # 연락처(전화번호) 정규식 추출
+        phone_pattern = r"010[-.\s]?\d{3,4}[-.\s]?\d{4}"
+        lines = raw_text.split('\n')
+        
+        parsed_data = []
+        current_phone = None
+        current_machines = []
+        
+        # 텍스트 라인별 순회하며 번호 및 기종 파싱
+        for line in lines:
+            if not line.strip():
+                continue
+            
+            # 연락처 탐색
+            phones = re.findall(phone_pattern, line)
+            if phones:
+                # 새로운 번호가 나오면 이전 데이터 저장
+                if current_phone and current_machines:
+                    parsed_data.append({"phone": current_phone, "machines": current_machines})
+                current_phone = phones[0].replace(" ", "").replace("-", "")
+                current_machines = []
+            
+            # 현재 기종 사전 리스트에 등록된 기종이 문장에 포함되어 있는지 대조
+            for machine_key in st.session_state.custom_formats.keys():
+                # 다중 기종 인식을 위해 슬래시(/)나 공백 분리 매칭 지원
+                sub_keys = [k.strip() for k in machine_key.split('/')]
+                for sk in sub_keys:
+                    if sk.lower() in line.lower() and machine_key not in current_machines:
+                        current_machines.append(machine_key)
+        
+        # 마지막 남은 잔여 데이터 처리
+        if current_phone and current_machines:
+            parsed_data.append({"phone": current_phone, "machines": current_machines})
+            
+        # 화면에 결과 출력 및 문자 발송 링크 생성
+        if not parsed_data:
+            st.warning("⚠️ 텍스트에서 올바른 전화번호와 등록된 기종 정보를 찾지 못했습니다. 기종별 사전 리스트에 등록된 기명이 포함되어 있는지 확인해 주세요.")
         else:
-            current_block += part
-    if current_block.strip():
-        blocks.append(current_block.strip())
-        
-    valid_blocks = [b.strip() for b in blocks if len(b.strip()) > 5 and re.match(r'^\d+(?:\s*,\s*)', b.strip())]
-    if not valid_blocks:
-        valid_blocks = [raw_text.strip()]
-        
-    machine_options = list(st.session_state.custom_formats.keys())
-    exclude_machines = ["기본 기종", "X3220NR", "X-9201", "SL-"]
+            for idx, item in enumerate(parsed_data):
+                target_phone = item["phone"]
+                machines_list = item["machines"]
+                
+                # 문자 내용 통합 조립 시작
+                msg_body = "안녕하세요, 퍼스트전산입니다.\n한 달 동안 사용하신 기기의 마감 진행을 위해 카운터 사진 요청드립니다.\n\n"
+                msg_body += f"📌 고객님께서 사용 중인 기기 목록 (총 {len(machines_list)}대):\n"
+                
+                for i, m_key in enumerate(machines_list, 1):
+                    detail_guide = st.session_state.custom_formats.get(m_key, "기기 카운터를 확인해 주세요.")
+                    msg_body += f"{i}. {m_key}: {detail_guide}\n"
+                
+                msg_body += "\n매번 번거롭게 해드려 죄송하며, 협조해 주셔서 늘 감사드립니다! 🙏"
+                
+                # 개별 업체별 레이아웃 구성
+                with st.container():
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.text_input(f"수신 연락처 ({idx+1})", value=target_phone, key=f"phone_show_{idx}")
+                        st.text_area(f"발송될 안내 문자 미리보기 ({idx+1})", value=msg_body, height=140, key=f"msg_show_{idx}")
+                    with col2:
+                        st.write("")
+                        st.write("")
+                        # 모바일용 SMS 전송인식 링크 생성 (sms:번호?body=내용)
+                        encoded_msg = urllib.parse.quote(msg_body)
+                        sms_url = f"sms:{target_phone}?body={encoded_msg}"
+                        
+                        st.markdown(f'<a href="{sms_url}" target="_blank"><button style="width:100%; background-color:#007BFF; color:white; font-weight:bold; border-radius:8px; padding:12px; border:none; cursor:pointer;">✉️ 문자 전송하기</button></a>', unsafe_allow_html=True)
+                st.markdown("---")
+
+# --- TAB 2: 기종별 사전 리스트 관리 화면 (사장님이 찾으시던 설정창) ---
+with tabs[1]:
+    st.subheader("⚙️ 복사기 기종 및 문자 양식 직접 수정")
+    st.info("💡 이곳에서 문구를 수정하거나 아래 칸에 기종을 새로 추가하시면, 앞의 마감 창에서 해당 기종을 인식할 때 바뀐 문구로 자동 조합됩니다.")
     
-    sms_data_list = []
-    for i, block in enumerate(valid_blocks, 1):
-        p_matches = re.findall(r'01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}', block)
-        detected_phone = p_matches[0] if p_matches else ""
-        
-        lines = [l.strip() for l in block.split('\n') if l.strip()]
-        detected_name = "거래처 확인 바람"
-        if lines:
-            first_line = lines[0]
-            name_part = re.sub(r'^\d+(?:\s*,\s*)\d*[A-Za-z]*', '', first_line).strip()
-            detected_name = name_part.split('매월마감')[0].strip() if name_part else first_line
-        
-        matched_machine = "기본 기종"
-        block_lower = block.lower()
-        if "9201" in block_lower: matched_machine = "X-9201"
-        elif "3220" in block_lower: matched_machine = "X3220NR"
-        elif "sl-" in block_lower: matched_machine = "SL-"
-        elif "ma2100" in block_lower: matched_machine = "MA2100"
-        elif "mp-c2003" in block_lower or "c2003" in block_lower: matched_machine = "C3003"
-        else:
-            for k in machine_options:
-                if k not in exclude_machines and k.lower() in block_lower:
-                    matched_machine = k
-                    break
-        
-        # 고정 키값 바인딩
-        if f"final_nm_{i}" not in st.session_state: st.session_state[f"final_nm_{i}"] = detected_name
-        if f"final_ph_{i}" not in st.session_state: st.session_state[f"final_ph_{i}"] = detected_phone
-        if f"final_mc_{i}" not in st.session_state: st.session_state[f"final_mc_{i}"] = matched_machine
-
-        sms_data_list.append({"index": i, "block_raw": block})
-
-    st.subheader(f"🚀 모바일 즉시 전송 버튼 목록 (총 {len(sms_data_list)}건)")
-    st.info("💡 아래 업체 버튼을 누르면 내용 최종 확인 팝업창이 나타납니다.")
+    # 기존 사전 데이터 리스트 출력 및 실시간 수정
+    updated_formats = {}
+    for m_name, m_guide in list(st.session_state.custom_formats.items()):
+        st.markdown(f"**🔹 기종 이름: {m_name}**")
+        # 입력창들의 키(Key) 이름이 겹쳐 뻗지 않도록 고유 고유 ID 부여
+        new_guide = st.text_area("카운터 확인 안내 문구", value=m_guide, key=f"setting_input_{m_name}", height=70)
+        updated_formats[m_name] = new_guide
     
-    btn_cols = st.columns(4)
-    for idx, s_info in enumerate(sms_data_list):
-        i = s_info["index"]
-        cur_name = st.session_state.get(f"nm_{i}_first", st.session_state[f"final_nm_{i}"])
-        cur_phone = re.sub(r'[^0-9]', '', st.session_state.get(f"ph_{i}_first", st.session_state[f"final_ph_{i}"]))
-        cur_machine = st.session_state.get(f"mc_{i}_first", st.session_state[f"final_mc_{i}"])
-        
-        cur_how = st.session_state.custom_formats.get(cur_machine, txt_default)
-        if "안녕하세요" in cur_how or "사용량확인차" in cur_how:
-            cur_msg = f"{cur_how}\n(기종: {cur_machine})\n매번 번거롭게 해드려 죄송합니다."
-        else:
-            cur_msg = f"안녕하세요 퍼스트 전산입니다.\n마감을 위해 마감 카운터 사진이 필요하여 연락드렸습니다.\n카운터 한장만 보내주시면 감사하겠습니다.\n\n▶ 기종: {cur_machine}\n▶ 방법: {cur_how}\n\n매번 번거롭게 해드려 죄송합니다."
-
-        col_target = btn_cols[idx % 4]
-        with col_target:
-            if cur_phone:
-                if st.button(f"💬 {cur_name} 발송", key=f"popup_btn_{i}", use_container_width=True):
-                    st.dialog(f"📱 {cur_name}님 문자 최종 확인")(lambda name=cur_name, phone=cur_phone, msg=cur_msg: (
-                        st.warning("⚠️ 아래 문구가 맞는지 확인 후 하단의 최종 전송을 눌러주세요."),
-                        st.write(f"**수신 번호:** {phone}"),
-                        st.code(msg, language=None),
-                        st.markdown(
-                            f'<a href="sms:{phone}?body={urllib.parse.quote(msg)}" target="_self" '
-                            f'style="display: block; width: 100%; text-align: center; padding: 0.8rem; '
-                            f'background-color: #00CC66; color: white; text-decoration: none; '
-                            f'border-radius: 8px; font-weight: bold; font-size: 18px; margin-top: 15px;">'
-                            f'✅ 확인완료: 지금 바로 문자 앱으로 보내기</a>', 
-                            unsafe_allow_html=True
-                        )
-                    ))()
-            else:
-                st.button(f"❌ {cur_name} (번호없음)", disabled=True, use_container_width=True, key=f"disabled_btn_{i}")
-
+    # 동적 업데이트 반영
+    st.session_state.custom_formats = updated_formats
+    
     st.markdown("---")
-    st.subheader("🔍 상세 정보 편집 및 개별 문구 확인")
+    st.subheader("➕ 새로운 복사기 기종 추가하기")
     
-    for s_info in sms_data_list:
-        i = s_info["index"]
-        with st.container():
-            col1, col2, col3 = st.columns([2, 1, 1])
-            with col1: u_name = st.text_input(f"업체명 ({i})", value=st.session_state[f"final_nm_{i}"], key=f"nm_{i}_first")
-            with col2: u_phone = st.text_input(f"연락처 ({i})", value=st.session_state[f"final_ph_{i}"], key=f"ph_{i}_first")
-            with col3:
-                d_idx = machine_options.index(st.session_state[f"final_mc_{i}"]) if st.session_state[f"final_mc_{i}"] in machine_options else machine_options.index("기본 기종")
-                u_machine = st.selectbox(f"기종 ({i})", options=machine_options, index=d_idx, key=f"mc_{i}_first")
-                
-            how = st.session_state.custom_formats.get(u_machine, txt_default)
-            if "안녕하세요" in how or "사용량확인차" in how:
-                final_msg = f"{how}\n(기종: {u_machine})\n매번 번거롭게 해드려 죄송합니다."
-            else:
-                final_msg = f"안녕하세요 퍼스트 전산입니다.\n마감을 위해 마감 카운터 사진이 필요하여 연락드렸습니다.\n카운터 한장만 보내주시면 감사하겠습니다.\n\n▶ 기종: {u_machine}\n▶ 방법: {how}\n\n매번 번거롭게 해드려 죄송합니다."
-                
-            st.write(f"💬 **최종 문구 미리보기 ({i})**")
-            st.code(final_msg, language=None)
-            st.markdown("<br>", unsafe_allow_html=True)
-elif analyze_clicked:
-    st.warning("⚠️ 붙여넣은 카톡 내용이 비어있습니다. 내용을 입력한 후 버튼을 눌러주세요.")
+    col_add1, col_add2 = st.columns([1, 2])
+    with col_add1:
+        new_machine_name = st.text_input("새로운 기종 이름 입력", placeholder="예: SCX-6545")
+    with col_add2:
+        new_machine_guide = st.text_input("해당 기종의 카운터 확인 방법 입력", placeholder="예: 계수기 버튼을 누르고 화면을 찍어주세요.")
+        
+    if st.button("✨ 새 기종 사전에 등록하기", key="btn_add_new_machine"):
+        if new_machine_name.strip() and new_machine_guide.strip():
+            st.session_state.custom_formats[new_machine_name.strip()] = new_machine_guide.strip()
+            st.success(f"✅ [{new_machine_name}] 기종이 사전에 정상적으로 추가되었습니다!")
+            st.rerun()
+        else:
+            st.error("⚠️ 기종 이름과 안내 문구를 모두 입력한 후 버튼을 눌러주세요.")
