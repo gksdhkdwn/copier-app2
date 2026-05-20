@@ -34,42 +34,4 @@ if "custom_formats" not in st.session_state:
         "D400": txt_sindo, "D410": txt_sindo, "D420": txt_sindo,
         "D450": txt_sindo, "D460": txt_sindo, "D470": txt_sindo,
         "MA2100": txt_ecosys, "M5526": txt_ecosys, "M5521": txt_ecosys,
-        "ECOSYS": txt_ecosys, "305": txt_305, "5473": txt_5473,
-        "C2263": txt_apeos, "C2265": txt_apeos, "C2061": txt_apeos,
-        "C3067": txt_apeos, "C2260": txt_apeos, "C2270": txt_apeos,
-        "C2275": txt_apeos, "C3375": txt_apeos, "C4475": txt_apeos,
-        "C5575": txt_apeos, "C2271": txt_apeos, "C2273": txt_apeos,
-        "C3371": txt_apeos, "C3373": txt_apeos, "C3070": txt_apeos,
-        "C3570": txt_apeos, "C4570": txt_apeos, "C5570": txt_apeos,
-        "C7070": txt_apeos, "Apeos": txt_apeos, "5700": txt_5700,
-        "L5100": txt_l5100, "2554": txt_ricoh, "C3003": txt_ricoh,
-        "C4504": txt_ricoh, "5005": txt_5005, "X3220NR": txt_x3220,
-        "X-9201": txt_x3220, "SL-": txt_samsung, "기본 기종": txt_default
-    }
-
-# 초기화 처리를 위한 세션 상태 등록
-if "input_text" not in st.session_state:
-    st.session_state.input_text = ""
-if "analyze_clicked" not in st.session_state:
-    st.session_state.analyze_clicked = False
-
-# 4. 상단 탭 구성
-tabs = st.tabs(["📝 마감 문자 대량 작성", "⚙️ 기종별 카운터 방법 사전"])
-
-with tabs[0]:
-    # 컨트롤 버튼 레이아웃
-    col_btn1, col_btn2, _ = st.columns([1.5, 1.5, 5])
-    
-    with col_btn1:
-        if st.button("🗑️ 입력 내용 전체 초기화", use_container_width=True):
-            st.session_state.input_text = ""
-            st.session_state.analyze_clicked = False
-            st.rerun()
-            
-    with col_btn2:
-        if st.button("🔍 마감 문자 변환하기", type="primary", use_container_width=True):
-            st.session_state.analyze_clicked = True
-
-    # 텍스트 에어리어 (세션 상태와 바인딩)
-    raw_text = st.text_area(
-        "
+        "ECOSYS": txt_ecosys, "305": txt_305, "5473": txt_5
