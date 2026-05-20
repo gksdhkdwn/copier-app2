@@ -45,24 +45,26 @@ if "analyze_clicked" not in st.session_state:
 tabs = st.tabs(["📝 마감 문자 대량 작성", "⚙️ 기종별 카운터 방법 사전"])
 
 with tabs[0]:
+    # 요구사항 1: 카톡 내용 붙여넣기 칸을 맨 위로 배치
+    raw_text = st.text_area("카톡 내용 붙여넣기:", value=st.session_state.input_text, height=250, key="text_input_area")
+    st.session_state.input_text = raw_text
+
+    # 요구사항 1: 초기화 및 변환 버튼을 입력 박스 아래로 이동
     col_btn1, col_btn2, _ = st.columns([1.5, 1.5, 5])
     with col_btn1:
-        # 초기화 버튼 클릭 시 입력창 데이터와 분석 상태를 완전히 지우고 리런합니다.
         if st.button("🗑️ 입력 내용 전체 초기화", use_container_width=True):
             st.session_state.input_text = ""
-            st.session_state.text_input_area = ""  # 입력창의 내부 Key 값도 비워줍니다.
+            st.session_state.text_input_area = ""
             st.session_state.analyze_clicked = False
             st.rerun()
     with col_btn2:
         if st.button("🔍 마감 문자 변환하기", type="primary", use_container_width=True):
             st.session_state.analyze_clicked = True
 
-    # 세션 상태와 연동하여 초기화 시 글자가 즉시 사라지도록 설정
-    raw_text = st.text_area("카톡 내용 붙여넣기:", value=st.session_state.input_text, height=250, key="text_input_area")
-    st.session_state.input_text = raw_text
+    st.markdown("---")
 
     if st.session_state.analyze_clicked and raw_text.strip():
-        # 오직 [숫자 + 콤마] 패턴만 추적하여 정확히 나눕니다.
+        # 오직 [숫자 + 콤마] 패턴만 추적하여 분리
         split_pattern = r'((?<=\n)\d+(?:\s*,\s*)\d*[A-Z]*)|(^\d+(?:\s*,\s*)\d*[A-Z]*)'
         raw_parts = re.split(split_pattern, raw_text)
         
@@ -83,9 +85,12 @@ with tabs[0]:
         if not valid_blocks:
             valid_blocks = [raw_text.strip()]
             
-        st.subheader(f"🔍 생성된 마감 문자 목록 (총 {len(valid_blocks)}건)")
+        st.subheader(f"🔍 1단계: 정보 확인 및 수정 (총 {len(valid_blocks)}건)")
         machine_options = list(st.session_state.custom_formats.keys())
         exclude_machines = ["기본 기종", "X3220NR", "X-9201", "SL-"]
+        
+        # 문자 전송에 필요한 데이터를 임시 보관할 리스트
+        sms_data_list = []
         
         for i, block in enumerate(valid_blocks, 1):
             with st.container():
@@ -125,20 +130,48 @@ with tabs[0]:
                     final_msg = f"{how}\n(기종: {u_machine})\n매번 번거롭게 해드려 죄송합니다."
                 else:
                     final_msg = f"안녕하세요 퍼스트 전산입니다.\n마감을 위해 마감 카운터 사진이 필요하여 연락드렸습니다.\n카운터 한장만 보내주시면 감사하겠습니다.\n\n▶ 기종: {u_machine}\n▶ 방법: {how}\n\n매번 번거롭게 해드려 죄송합니다."
-                    
+                
+                # 아래 버튼 영역에서 꺼내 쓸 수 있도록 데이터 저장
+                sms_data_list.append({
+                    "index": i,
+                    "name": u_name,
+                    "phone": re.sub(r'[^0-9]', '', u_phone),
+                    "msg": final_msg
+                })
+                
                 st.write(f"💬 **최종 문구 미리보기 및 PC 복사 ({i})**")
                 st.code(final_msg, language=None)
-                
-                encoded_msg = urllib.parse.quote(final_msg)
-                clean_phone = re.sub(r'[^0-9]', '', u_phone)
-                sms_url = f"sms:{clean_phone}?body={encoded_msg}"
-                
-                if clean_phone:
-                    b_style = "display: block; width: 100%; text-align: center; padding: 0.6rem; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; margin-top: 5px;"
-                    st.markdown(f'<a href="{sms_url}" target="_self" style="{b_style}">💬 모바일 전용: {u_name}님께 즉시 문자보내기</a>', unsafe_allow_html=True)
+                st.markdown("<br>", unsafe_allow_html=True)
+        
+        # 요구사항 2: 문자 발송 버튼만 맨 밑에 따로 나열하기
+        st.markdown("---")
+        st.subheader("🚀 2단계: 모바일 문자 전송 버튼 모음")
+        st.info("💡 아래 버튼을 누르면 내용 확인 팝업창이 열립니다.")
+        
+        # 버튼들을 4열 바둑판 형태로 이쁘게 배열
+        btn_cols = st.columns(4)
+        for idx, s_data in enumerate(sms_data_list):
+            col_target = btn_cols[idx % 4]
+            with col_target:
+                if s_data["phone"]:
+                    # 요구사항 3: 문자 발송 버튼 클릭 시 팝업 모달창 열기
+                    if st.button(f"💬 {s_data['name']} 발송", key=f"popup_btn_{s_data['index']}", use_container_width=True):
+                        st.dialog(f"📱 {s_data['name']}님 문자 최종 확인")(lambda data=s_data: (
+                            st.warning("⚠️ 아래 문구가 맞는지 확인 후 하단의 최종 전송을 눌러주세요."),
+                            st.write(f"**수신 번호:** {data['phone']}"),
+                            st.code(data['msg'], language=None),
+                            st.markdown(
+                                f'<a href="sms:{data["phone"]}?body={urllib.parse.quote(data["msg"])}" target="_self" '
+                                f'style="display: block; width: 100%; text-align: center; padding: 0.8rem; '
+                                f'background-color: #00CC66; color: white; text-decoration: none; '
+                                f'border-radius: 8px; font-weight: bold; font-size: 18px; margin-top: 15px;">'
+                                f'✅ 확인완료: 지금 바로 문자 앱으로 보내기</a>', 
+                                unsafe_allow_html=True
+                            )
+                        ))()
                 else:
-                    st.warning("⚠️ 추출된 연락처가 없습니다. 직접 입력하시면 전송 버튼이 활성화됩니다.")
-                st.markdown("---")
+                    st.button(f"❌ {s_data['name']} (번호없음)", disabled=True, use_container_width=True, key=f"disabled_btn_{s_data['index']}")
+
     elif st.session_state.analyze_clicked:
         st.warning("⚠️ 붙여넣은 카톡 내용이 비어있습니다. 내용을 입력한 후 버튼을 눌러주세요.")
 
