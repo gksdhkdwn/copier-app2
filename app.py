@@ -5,7 +5,7 @@ import urllib.parse
 # 1. 페이지 기본 설정
 st.set_page_config(page_title="퍼스트전산 마감 도우미", page_icon="📱", layout="wide")
 st.title("퍼스트전산 마감 도우미 📱")
-st.caption("카톡 내용을 복사해 넣으면 세부 기종 사전과 매칭하여 정확한 마감 문자를 대량 생성합니다.")
+st.caption("카톡 내용을 복사해 넣으면 번호가 적힌 거래처만 정확하게 인식하여 마감 문자를 대량 생성합니다.")
 
 # 2. 안내 문구 기본값 정의
 txt_sindo = "기기 메뉴버튼 → 화면 윗쪽 카운터 버튼 → 목록인쇄 → 시작 누르시면 출력물 하나 나옵니다. 인쇄물 캡쳐본 문자로 부탁드립니다."
@@ -59,14 +59,16 @@ with tabs[0]:
     st.session_state.input_text = raw_text
 
     if st.session_state.analyze_clicked and raw_text.strip():
-        split_pattern = r'(\[.*?\]|【.*?】|(?<=\n)\d+(?:\s*,\s*)\d*[A-Z]*)|(^\d+(?:\s*,\s*)\d*[A-Z]*)'
+        # 대괄호 패턴은 과감히 버리고 오직 [숫자 + 콤마] 패턴만 추적하여 정확히 나눕니다.
+        split_pattern = r'((?<=\n)\d+(?:\s*,\s*)\d*[A-Z]*)|(^\d+(?:\s*,\s*)\d*[A-Z]*)'
         raw_parts = re.split(split_pattern, raw_text)
         
         blocks, current_block = [], ""
         for part in raw_parts:
             if part is None:
                 continue
-            if re.match(r'(\[.*?\]|【.*?】|^\d+(?:\s*,\s*))', part.strip()):
+            # 숫자와 콤마로 시작하는 마감 첫 문장인지 체크
+            if re.match(r'^\d+(?:\s*,\s*)', part.strip()):
                 if current_block.strip():
                     blocks.append(current_block.strip())
                 current_block = part
@@ -75,7 +77,8 @@ with tabs[0]:
         if current_block.strip():
             blocks.append(current_block.strip())
             
-        valid_blocks = [b.strip() for b in blocks if len(b.strip()) > 5]
+        # 번호 인식이 정상적으로 된 덩어리만 유효값으로 통과시킵니다.
+        valid_blocks = [b.strip() for b in blocks if len(b.strip()) > 5 and re.match(r'^\d+(?:\s*,\s*)', b.strip())]
         if not valid_blocks:
             valid_blocks = [raw_text.strip()]
             
@@ -85,6 +88,7 @@ with tabs[0]:
         
         for i, block in enumerate(valid_blocks, 1):
             with st.container():
+                # 휴대폰 번호 추출
                 p_matches = re.findall(r'01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}', block)
                 detected_phone = p_matches[0] if p_matches else ""
                 
@@ -92,10 +96,12 @@ with tabs[0]:
                 detected_name = "거래처 확인 바람"
                 
                 if lines:
-                    first_line = lines[1] if ('[' in lines[0] or '【' in lines[0]) and len(lines) > 1 else lines[0]
-                    name_part = re.sub(r'^\d+\s*,\s*\d*[A-Z]*', '', first_line).strip()
+                    first_line = lines[0]
+                    # 맨 앞의 '28, 28SS' 같은 번호 영역 싹 도려내고 회사 이름만 남기기
+                    name_part = re.sub(r'^\d+(?:\s*,\s*)\d*[A-Za-z]*', '', first_line).strip()
                     detected_name = name_part.split('매월마감')[0].strip() if name_part else first_line
                 
+                # 기종 자동 매칭 시스템
                 matched_machine = "기본 기종"
                 block_lower = block.lower()
                 if "9201" in block_lower: matched_machine = "X-9201"
@@ -140,7 +146,6 @@ with tabs[0]:
 
 with tabs[1]:
     st.subheader("⚙️ 기종별 사전 리스트")
-    # 중복 Key 방지를 위해 고유한 접두사(dic_set_) 부여 처리
     for idx, machine_type in enumerate(list(st.session_state.custom_formats.keys())):
         method_text = st.session_state.custom_formats[machine_type]
         col_k, col_v = st.columns([1, 3])
