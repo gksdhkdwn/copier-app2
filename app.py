@@ -45,11 +45,10 @@ if "analyze_clicked" not in st.session_state:
 tabs = st.tabs(["📝 마감 문자 대량 작성", "⚙️ 기종별 카운터 방법 사전"])
 
 with tabs[0]:
-    # 요구사항 1: 카톡 내용 붙여넣기 칸을 맨 위로 배치
-    raw_text = st.text_area("카톡 내용 붙여넣기:", value=st.session_state.input_text, height=250, key="text_input_area")
+    # 요구사항 1: 긴 텍스트가 와도 내부 스크롤 없이 한번에 다 펼쳐 보이게 height=None 설정
+    raw_text = st.text_area("카톡 내용 붙여넣기:", value=st.session_state.input_text, height=None, key="text_input_area")
     st.session_state.input_text = raw_text
 
-    # 요구사항 1: 초기화 및 변환 버튼을 입력 박스 아래로 이동
     col_btn1, col_btn2, _ = st.columns([1.5, 1.5, 5])
     with col_btn1:
         if st.button("🗑️ 입력 내용 전체 초기화", use_container_width=True):
@@ -64,7 +63,7 @@ with tabs[0]:
     st.markdown("---")
 
     if st.session_state.analyze_clicked and raw_text.strip():
-        # 오직 [숫자 + 콤마] 패턴만 추적하여 분리
+        # [숫자 + 콤마] 패턴 기반 거래처 파싱 알고리즘
         split_pattern = r'((?<=\n)\d+(?:\s*,\s*)\d*[A-Z]*)|(^\d+(?:\s*,\s*)\d*[A-Z]*)'
         raw_parts = re.split(split_pattern, raw_text)
         
@@ -85,83 +84,71 @@ with tabs[0]:
         if not valid_blocks:
             valid_blocks = [raw_text.strip()]
             
-        st.subheader(f"🔍 1단계: 정보 확인 및 수정 (총 {len(valid_blocks)}건)")
         machine_options = list(st.session_state.custom_formats.keys())
         exclude_machines = ["기본 기종", "X3220NR", "X-9201", "SL-"]
         
-        # 문자 전송에 필요한 데이터를 임시 보관할 리스트
+        # 1차 루프: 화면을 그리기 전에 데이터 및 문자 메시지를 먼저 가공해서 리스트화
         sms_data_list = []
-        
         for i, block in enumerate(valid_blocks, 1):
-            with st.container():
-                p_matches = re.findall(r'01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}', block)
-                detected_phone = p_matches[0] if p_matches else ""
-                
-                lines = [l.strip() for l in block.split('\n') if l.strip()]
-                detected_name = "거래처 확인 바람"
-                
-                if lines:
-                    first_line = lines[0]
-                    name_part = re.sub(r'^\d+(?:\s*,\s*)\d*[A-Za-z]*', '', first_line).strip()
-                    detected_name = name_part.split('매월마감')[0].strip() if name_part else first_line
-                
-                matched_machine = "기본 기종"
-                block_lower = block.lower()
-                if "9201" in block_lower: matched_machine = "X-9201"
-                elif "3220" in block_lower: matched_machine = "X3220NR"
-                elif "sl-" in block_lower: matched_machine = "SL-"
-                elif "ma2100" in block_lower: matched_machine = "MA2100"
-                elif "mp-c2003" in block_lower or "c2003" in block_lower: matched_machine = "C3003"
-                else:
-                    for k in machine_options:
-                        if k not in exclude_machines and k.lower() in block_lower:
-                            matched_machine = k
-                            break
-                            
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col1: u_name = st.text_input(f"업체명 ({i})", value=detected_name, key=f"nm_{i}_first")
-                with col2: u_phone = st.text_input(f"연락처 ({i})", value=detected_phone, key=f"ph_{i}_first")
-                with col3:
-                    d_idx = machine_options.index(matched_machine) if matched_machine in machine_options else machine_options.index("기본 기종")
-                    u_machine = st.selectbox(f"기종 ({i})", options=machine_options, index=d_idx, key=f"mc_{i}_first")
-                    
-                how = st.session_state.custom_formats.get(u_machine, txt_default)
-                if "안녕하세요" in how or "사용량확인차" in how:
-                    final_msg = f"{how}\n(기종: {u_machine})\n매번 번거롭게 해드려 죄송합니다."
-                else:
-                    final_msg = f"안녕하세요 퍼스트 전산입니다.\n마감을 위해 마감 카운터 사진이 필요하여 연락드렸습니다.\n카운터 한장만 보내주시면 감사하겠습니다.\n\n▶ 기종: {u_machine}\n▶ 방법: {how}\n\n매번 번거롭게 해드려 죄송합니다."
-                
-                # 아래 버튼 영역에서 꺼내 쓸 수 있도록 데이터 저장
-                sms_data_list.append({
-                    "index": i,
-                    "name": u_name,
-                    "phone": re.sub(r'[^0-9]', '', u_phone),
-                    "msg": final_msg
-                })
-                
-                st.write(f"💬 **최종 문구 미리보기 및 PC 복사 ({i})**")
-                st.code(final_msg, language=None)
-                st.markdown("<br>", unsafe_allow_html=True)
+            p_matches = re.findall(r'01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}', block)
+            detected_phone = p_matches[0] if p_matches else ""
+            
+            lines = [l.strip() for l in block.split('\n') if l.strip()]
+            detected_name = "거래처 확인 바람"
+            if lines:
+                first_line = lines[0]
+                name_part = re.sub(r'^\d+(?:\s*,\s*)\d*[A-Za-z]*', '', first_line).strip()
+                detected_name = name_part.split('매월마감')[0].strip() if name_part else first_line
+            
+            matched_machine = "기본 기종"
+            block_lower = block.lower()
+            if "9201" in block_lower: matched_machine = "X-9201"
+            elif "3220" in block_lower: matched_machine = "X3220NR"
+            elif "sl-" in block_lower: matched_machine = "SL-"
+            elif "ma2100" in block_lower: matched_machine = "MA2100"
+            elif "mp-c2003" in block_lower or "c2003" in block_lower: matched_machine = "C3003"
+            else:
+                for k in machine_options:
+                    if k not in exclude_machines and k.lower() in block_lower:
+                        matched_machine = k
+                        break
+            
+            # 우선 초기 탐지값 기준으로 세션에 임시 바인딩(사용자 편집을 동적으로 수용하기 위함)
+            if f"final_nm_{i}" not in st.session_state: st.session_state[f"final_nm_{i}"] = detected_name
+            if f"final_ph_{i}" not in st.session_state: st.session_state[f"final_ph_{i}"] = detected_phone
+            if f"final_mc_{i}" not in st.session_state: st.session_state[f"final_mc_{i}"] = matched_machine
+
+            sms_data_list.append({"index": i, "block_raw": block})
+
+        # 요구사항 2: 문자 발송 버튼 리스트를 초기화 버튼 바로 아래(가장 먼저) 나열해 주기
+        st.subheader(f"🚀 모바일 즉시 전송 버튼 목록 (총 {len(sms_data_list)}건)")
+        st.info("💡 아래 업체 버튼을 누르면 내용 최종 확인 팝업창이 나타납니다.")
         
-        # 요구사항 2: 문자 발송 버튼만 맨 밑에 따로 나열하기
-        st.markdown("---")
-        st.subheader("🚀 2단계: 모바일 문자 전송 버튼 모음")
-        st.info("💡 아래 버튼을 누르면 내용 확인 팝업창이 열립니다.")
-        
-        # 버튼들을 4열 바둑판 형태로 이쁘게 배열
         btn_cols = st.columns(4)
-        for idx, s_data in enumerate(sms_data_list):
+        for idx, s_info in enumerate(sms_data_list):
+            i = s_info["index"]
+            # 실시간으로 변경될 수 있는 세션 입력값 반영
+            cur_name = st.session_state.get(f"nm_{i}_first", st.session_state[f"final_nm_{i}"])
+            cur_phone = re.sub(r'[^0-9]', '', st.session_state.get(f"ph_{i}_first", st.session_state[f"final_ph_{i}"]))
+            cur_machine = st.session_state.get(f"mc_{i}_first", st.session_state[f"final_mc_{i}"])
+            
+            # 최종 결합 안내 문구 생성
+            cur_how = st.session_state.custom_formats.get(cur_machine, txt_default)
+            if "안녕하세요" in cur_how or "사용량확인차" in cur_how:
+                cur_msg = f"{cur_how}\n(기종: {cur_machine})\n매번 번거롭게 해드려 죄송합니다."
+            else:
+                cur_msg = f"안녕하세요 퍼스트 전산입니다.\n마감을 위해 마감 카운터 사진이 필요하여 연락드렸습니다.\n카운터 한장만 보내주시면 감사하겠습니다.\n\n▶ 기종: {cur_machine}\n▶ 방법: {cur_how}\n\n매번 번거롭게 해드려 죄송합니다."
+
             col_target = btn_cols[idx % 4]
             with col_target:
-                if s_data["phone"]:
-                    # 요구사항 3: 문자 발송 버튼 클릭 시 팝업 모달창 열기
-                    if st.button(f"💬 {s_data['name']} 발송", key=f"popup_btn_{s_data['index']}", use_container_width=True):
-                        st.dialog(f"📱 {s_data['name']}님 문자 최종 확인")(lambda data=s_data: (
+                if cur_phone:
+                    if st.button(f"💬 {cur_name} 발송", key=f"popup_btn_{i}", use_container_width=True):
+                        st.dialog(f"📱 {cur_name}님 문자 최종 확인")(lambda name=cur_name, phone=cur_phone, msg=cur_msg: (
                             st.warning("⚠️ 아래 문구가 맞는지 확인 후 하단의 최종 전송을 눌러주세요."),
-                            st.write(f"**수신 번호:** {data['phone']}"),
-                            st.code(data['msg'], language=None),
+                            st.write(f"**수신 번호:** {phone}"),
+                            st.code(msg, language=None),
                             st.markdown(
-                                f'<a href="sms:{data["phone"]}?body={urllib.parse.quote(data["msg"])}" target="_self" '
+                                f'<a href="sms:{phone}?body={urllib.parse.quote(msg)}" target="_self" '
                                 f'style="display: block; width: 100%; text-align: center; padding: 0.8rem; '
                                 f'background-color: #00CC66; color: white; text-decoration: none; '
                                 f'border-radius: 8px; font-weight: bold; font-size: 18px; margin-top: 15px;">'
@@ -170,7 +157,31 @@ with tabs[0]:
                             )
                         ))()
                 else:
-                    st.button(f"❌ {s_data['name']} (번호없음)", disabled=True, use_container_width=True, key=f"disabled_btn_{s_data['index']}")
+                    st.button(f"❌ {cur_name} (번호없음)", disabled=True, use_container_width=True, key=f"disabled_btn_{i}")
+
+        st.markdown("---")
+        st.subheader("🔍 상세 정보 편집 및 개별 문구 확인")
+        
+        # 버튼 밑에 세부 내용 수정 테이블 배치
+        for s_info in sms_data_list:
+            i = s_info["index"]
+            with st.container():
+                col1, col2, col3 = st.columns([2, 1, 1])
+                with col1: u_name = st.text_input(f"업체명 ({i})", value=st.session_state[f"final_nm_{i}"], key=f"nm_{i}_first")
+                with col2: u_phone = st.text_input(f"연락처 ({i})", value=st.session_state[f"final_ph_{i}"], key=f"ph_{i}_first")
+                with col3:
+                    d_idx = machine_options.index(st.session_state[f"final_mc_{i}"]) if st.session_state[f"final_mc_{i}"] in machine_options else machine_options.index("기본 기종")
+                    u_machine = st.selectbox(f"기종 ({i})", options=machine_options, index=d_idx, key=f"mc_{i}_first")
+                    
+                how = st.session_state.custom_formats.get(u_machine, txt_default)
+                if "안녕하세요" in how or "사용량확인차" in how:
+                    final_msg = f"{how}\n(기종: {u_machine})\n매번 번거롭게 해드려 죄송합니다."
+                else:
+                    final_msg = f"안녕하세요 퍼스트 전산입니다.\n마감을 위해 마감 카운터 사진이 필요하여 연락드렸습니다.\n카운터 한장만 보내주시면 감사하겠습니다.\n\n▶ 기종: {u_machine}\n▶ 방법: {how}\n\n매번 번거롭게 해드려 죄송합니다."
+                    
+                st.write(f"💬 **최종 문구 미리보기 ({i})**")
+                st.code(final_msg, language=None)
+                st.markdown("<br>", unsafe_allow_html=True)
 
     elif st.session_state.analyze_clicked:
         st.warning("⚠️ 붙여넣은 카톡 내용이 비어있습니다. 내용을 입력한 후 버튼을 눌러주세요.")
