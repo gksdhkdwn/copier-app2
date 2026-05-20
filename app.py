@@ -47,19 +47,22 @@ tabs = st.tabs(["📝 마감 문자 대량 작성", "⚙️ 기종별 카운터 
 with tabs[0]:
     col_btn1, col_btn2, _ = st.columns([1.5, 1.5, 5])
     with col_btn1:
+        # 초기화 버튼 클릭 시 입력창 데이터와 분석 상태를 완전히 지우고 리런합니다.
         if st.button("🗑️ 입력 내용 전체 초기화", use_container_width=True):
             st.session_state.input_text = ""
+            st.session_state.text_input_area = ""  # 입력창의 내부 Key 값도 비워줍니다.
             st.session_state.analyze_clicked = False
             st.rerun()
     with col_btn2:
         if st.button("🔍 마감 문자 변환하기", type="primary", use_container_width=True):
             st.session_state.analyze_clicked = True
 
+    # 세션 상태와 연동하여 초기화 시 글자가 즉시 사라지도록 설정
     raw_text = st.text_area("카톡 내용 붙여넣기:", value=st.session_state.input_text, height=250, key="text_input_area")
     st.session_state.input_text = raw_text
 
     if st.session_state.analyze_clicked and raw_text.strip():
-        # 대괄호 패턴은 과감히 버리고 오직 [숫자 + 콤마] 패턴만 추적하여 정확히 나눕니다.
+        # 오직 [숫자 + 콤마] 패턴만 추적하여 정확히 나눕니다.
         split_pattern = r'((?<=\n)\d+(?:\s*,\s*)\d*[A-Z]*)|(^\d+(?:\s*,\s*)\d*[A-Z]*)'
         raw_parts = re.split(split_pattern, raw_text)
         
@@ -67,7 +70,6 @@ with tabs[0]:
         for part in raw_parts:
             if part is None:
                 continue
-            # 숫자와 콤마로 시작하는 마감 첫 문장인지 체크
             if re.match(r'^\d+(?:\s*,\s*)', part.strip()):
                 if current_block.strip():
                     blocks.append(current_block.strip())
@@ -77,7 +79,6 @@ with tabs[0]:
         if current_block.strip():
             blocks.append(current_block.strip())
             
-        # 번호 인식이 정상적으로 된 덩어리만 유효값으로 통과시킵니다.
         valid_blocks = [b.strip() for b in blocks if len(b.strip()) > 5 and re.match(r'^\d+(?:\s*,\s*)', b.strip())]
         if not valid_blocks:
             valid_blocks = [raw_text.strip()]
@@ -88,7 +89,6 @@ with tabs[0]:
         
         for i, block in enumerate(valid_blocks, 1):
             with st.container():
-                # 휴대폰 번호 추출
                 p_matches = re.findall(r'01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}', block)
                 detected_phone = p_matches[0] if p_matches else ""
                 
@@ -97,11 +97,9 @@ with tabs[0]:
                 
                 if lines:
                     first_line = lines[0]
-                    # 맨 앞의 '28, 28SS' 같은 번호 영역 싹 도려내고 회사 이름만 남기기
                     name_part = re.sub(r'^\d+(?:\s*,\s*)\d*[A-Za-z]*', '', first_line).strip()
                     detected_name = name_part.split('매월마감')[0].strip() if name_part else first_line
                 
-                # 기종 자동 매칭 시스템
                 matched_machine = "기본 기종"
                 block_lower = block.lower()
                 if "9201" in block_lower: matched_machine = "X-9201"
