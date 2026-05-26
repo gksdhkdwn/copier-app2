@@ -65,9 +65,53 @@ PHONE_RE = r'01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}'
 
 # 사람 이름이 아닐 가능성이 높은 단어 (잘못 추출 방지)
 NON_NAME_WORDS = {
-    '연락처', '전화', '핸드폰', '담당자', '카운터', '문자', '핸드폰', '전화번호',
-    '대표번호', '사무실', '본사', '지사', '지점', '매장', '연락', '문의'
+    # 일정/마감
+    '분기마감', '매월마감', '매월방문', '매주방문', '매주마감', '격주방문',
+    '격주마감', '월말마감', '월말방문', '분기', '마감', '방문', '매월',
+    '매주', '격주', '월말',
+    # 업무/상태
+    '계약', '결제', '영업', '관리', '인쇄', '출력', '점검', '신규',
+    '갱신', '해지', '카운터', '문자', '자료', '발송', '확인', '안내',
+    '미수', '부착', '미부착', '유지보수', '유지', '보수', '서비스',
+    # 위치/장소
+    '오른쪽', '왼쪽', '비서실', '회의실', '사무실', '관리실', '영업실',
+    '본사', '지사', '지점', '매장',
+    # 일반
+    '연락처', '전화', '핸드폰', '전화번호', '대표번호', '연락', '문의',
+    '담당자', '복합기', '키맨',
+    # 부서/팀
+    '경영', '재무', '인사', '총무', '구매', '생산', '품질', '기술',
+    '연구', '개발', '기획', '전산', '시설', '경비',
 }
+
+
+def _find_name_after(after):
+    """after 시작 위치의 한국 이름 추출 (3-2-4자 순으로 시도, 부분문자열 거부)"""
+    stripped = re.sub(r'^[\s:\-/,·()]+', '', after)
+    for length in (3, 2, 4):
+        if len(stripped) >= length:
+            cand = stripped[:length]
+            if re.fullmatch(rf'[가-힣]{{{length}}}', cand):
+                # 다음 글자가 한글이면 더 긴 단어의 일부 - 거부
+                if length < len(stripped) and re.match(r'[가-힣]', stripped[length]):
+                    continue
+                if cand not in NON_NAME_WORDS:
+                    return cand
+    return None
+
+
+def _find_name_before(before):
+    """before 끝 위치의 한국 이름 추출"""
+    stripped = re.sub(r'[\s:\-/,·()]+$', '', before)
+    for length in (3, 2, 4):
+        if len(stripped) >= length:
+            cand = stripped[-length:]
+            if re.fullmatch(rf'[가-힣]{{{length}}}', cand):
+                if length < len(stripped) and re.match(r'[가-힣]', stripped[-length-1]):
+                    continue
+                if cand not in NON_NAME_WORDS:
+                    return cand
+    return None
 
 
 # 3. 설정 파일 로드/저장
@@ -128,49 +172,66 @@ def normalize_company_name(name):
 
 # 5. 💡 [신규] 전화번호 + 담당자 이름/직책 추출
 def extract_contacts(block):
-    """블록에서 [{'phone': '01012345678', 'label': '홍길동 과장'}, ...] 반환"""
+    """블록에서 [{'phone': '01012345678', 'label': '홍길동 과장'}, ...] 반환.
+    인접 전화번호 사이로 검색영역을 제한하여 한 줄에 여러 명이 있어도 정확히 매칭."""
     results = []
+    phone_matches = list(re.finditer(PHONE_RE, block))
     seen = set()
     
-    for m in re.finditer(PHONE_RE, block):
+    for idx, m in enumerate(phone_matches):
         phone_raw = m.group(0)
         clean = re.sub(r'[^0-9]', '', phone_raw)
         if clean in seen:
             continue
         seen.add(clean)
         
-        before = block[max(0, m.start() - 50):m.start()]
-        after = block[m.end():min(len(block), m.end() + 30)]
+        # 인접 전화번호로 검색 영역 제한
+        before_start = phone_matches[idx-1].end() if idx > 0 else max(0, m.start() - 60)
+        before = block[before_start:m.start()]
+        after_end = phone_matches[idx+1].start() if idx + 1 < len(phone_matches) else min(len(block), m.end() + 40)
+        after = block[m.end():after_end]
         
         label = ""
         
-        # 패턴 A: "이름 직책 [구분자] 전화번호"
-        ma = re.search(rf'(?:^|[\s/,:·\-])({NAME_RE})\s*({TITLE_RE})\s*[:\-\s/]*$', before)
+        # P1: 이름+직책 (뒤) - 가장 신뢰도 높음
+        ma = re.search(rf'^\s*[:\-\s/,·()]*\s*({NAME_RE})\s*({TITLE_RE})', after)
         if ma and ma.group(1) not in NON_NAME_WORDS:
             label = f"{ma.group(1)} {ma.group(2)}"
-        else:
-            # 패턴 B: "직책 이름 [구분자] 전화번호"
-            ma = re.search(rf'({TITLE_RE})\s+({NAME_RE})\s*[:\-\s/]*$', before)
+        # P2: 이름+직책 (앞)
+        if not label:
+            ma = re.search(rf'(?:^|[\s/,:·\-()])({NAME_RE})\s*({TITLE_RE})\s*[:\-\s/()]*$', before)
+            if ma and ma.group(1) not in NON_NAME_WORDS:
+                label = f"{ma.group(1)} {ma.group(2)}"
+        # P3: 직책+이름 (뒤)
+        if not label:
+            ma = re.search(rf'^\s*[:\-\s/,·()]*\s*({TITLE_RE})\s+({NAME_RE})', after)
             if ma and ma.group(2) not in NON_NAME_WORDS:
                 label = f"{ma.group(2)} {ma.group(1)}"
-            else:
-                # 패턴 C: "직책 [구분자] 전화번호" (이름 없음)
-                ma = re.search(rf'(?:^|[\s/,:·\-])({TITLE_RE})\s*[:\-\s/]*$', before)
-                if ma:
-                    label = ma.group(1)
-                else:
-                    # 패턴 D: "이름 [구분자] 전화번호"
-                    ma = re.search(rf'(?:^|[\s/,:·\-])({NAME_RE})\s*[:\-\s/]*$', before)
-                    if ma and ma.group(1) not in NON_NAME_WORDS:
-                        label = ma.group(1)
-        
-        # 앞에서 못 찾으면 뒤쪽 시도
+        # P4: 직책+이름 (앞)
         if not label:
-            ma = re.search(rf'^\s*[:\-\s/,·]*\s*({NAME_RE})(?:\s+({TITLE_RE}))?', after)
-            if ma and ma.group(1) not in NON_NAME_WORDS:
+            ma = re.search(rf'({TITLE_RE})\s+({NAME_RE})\s*[:\-\s/()]*$', before)
+            if ma and ma.group(2) not in NON_NAME_WORDS:
+                label = f"{ma.group(2)} {ma.group(1)}"
+        # P5: 이름만 (뒤 시작) - 한 줄에 여러 명일 때 핵심
+        if not label:
+            name = _find_name_after(after)
+            if name:
+                label = name
+        # P6: 이름만 (앞 끝)
+        if not label:
+            name = _find_name_before(before)
+            if name:
+                label = name
+        # P7: 직책만 (뒤)
+        if not label:
+            ma = re.search(rf'^\s*[:\-\s/,·()]*\s*({TITLE_RE})', after)
+            if ma:
                 label = ma.group(1)
-                if ma.group(2):
-                    label = f"{label} {ma.group(2)}"
+        # P8: 직책만 (앞)
+        if not label:
+            ma = re.search(rf'(?:^|[\s/,:·\-()])({TITLE_RE})\s*[:\-\s/()]*$', before)
+            if ma:
+                label = ma.group(1)
         
         results.append({"phone": clean, "label": label})
     
