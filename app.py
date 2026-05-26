@@ -8,10 +8,9 @@ from collections import OrderedDict
 # 1. 페이지 기본 설정
 st.set_page_config(page_title="퍼스트전산 마감 도우미", page_icon="📱", layout="wide")
 
-# 설정 파일 경로 (영구 저장)
 SETTINGS_FILE = "message_settings.json"
 
-# 2. 안내 문구 기본값 정의
+# 2. 안내 문구 기본값
 txt_sindo = "기기 메뉴버튼 → 화면 윗쪽 카운터 버튼 → 목록인쇄 → 시작 누르시면 출력물 하나 나옵니다. 인쇄물 캡쳐본 문자로 부탁드립니다."
 txt_ecosys = "기기 화면 좌측 하단 시스템메뉴/카운터 버튼 누르신 후 → 리포트 → 리포트 인쇄 → 스테이터스페이지 인쇄 하시면 출력물이 나옵니다. 캡쳐 후 문자로 부탁드립니다."
 txt_305 = "1. 기계확인/사양설정 → 2. 리포트 → 프린터사용량 ok 누르신 후 리포트 캡쳐본 문자로 부탁드립니다."
@@ -38,7 +37,6 @@ DEFAULT_FORMATS = {
     "X-9201": txt_x3220, "SL-": txt_samsung, "기본 기종": txt_default
 }
 
-# 💡 [신규] 문자 전체 양식 기본값 (인사말 / 마무리말)
 DEFAULT_TEMPLATES = {
     "single_greeting": (
         "안녕하세요 퍼스트 전산입니다.\n"
@@ -54,42 +52,45 @@ DEFAULT_TEMPLATES = {
     "multi_closing": "매번 번거롭게 해드려 죄송합니다.",
 }
 
-TEMPLATE_LABELS = {
-    "single_greeting": "📄 단일 기기 — 인사말",
-    "single_closing": "📄 단일 기기 — 마무리말",
-    "multi_greeting": "📚 통합 발송 — 인사말 (`{total}` 사용 가능)",
-    "multi_closing": "📚 통합 발송 — 마무리말",
+# 한국 직책 키워드 (담당자 라벨 추출용)
+TITLE_LIST = [
+    '회장', '부회장', '사장', '부사장', '대표이사', '대표', '전무이사', '전무',
+    '상무이사', '상무', '본부장', '부서장', '실장', '팀장', '부장', '차장', '과장',
+    '대리', '주임', '사원', '이사', '원장', '점장', '점주', '매니저', '소장', '계장',
+    '담당자', '담당', '기사', '선생', '박사', '사모', '여사', '회계', '경리'
+]
+TITLE_RE = '(?:' + '|'.join(TITLE_LIST) + ')(?:님)?'
+NAME_RE = r'[가-힣]{2,4}'
+PHONE_RE = r'01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}'
+
+# 사람 이름이 아닐 가능성이 높은 단어 (잘못 추출 방지)
+NON_NAME_WORDS = {
+    '연락처', '전화', '핸드폰', '담당자', '카운터', '문자', '핸드폰', '전화번호',
+    '대표번호', '사무실', '본사', '지사', '지점', '매장', '연락', '문의'
 }
 
 
-# 3. 설정 파일 로드/저장 (기존 구버전 호환)
+# 3. 설정 파일 로드/저장
 def load_settings():
-    """JSON 파일에서 기종 텍스트 + 양식 템플릿을 함께 로드"""
     machines = DEFAULT_FORMATS.copy()
     templates = DEFAULT_TEMPLATES.copy()
-    
     try:
         if os.path.exists(SETTINGS_FILE):
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                 loaded = json.load(f)
-            
             if isinstance(loaded, dict) and ("machines" in loaded or "templates" in loaded):
-                # 신버전 구조
                 if isinstance(loaded.get("machines"), dict):
                     machines.update(loaded["machines"])
                 if isinstance(loaded.get("templates"), dict):
                     templates.update(loaded["templates"])
             elif isinstance(loaded, dict):
-                # 구버전 구조 (평탄 dict) 호환
                 machines.update(loaded)
     except Exception:
         pass
-    
     return machines, templates
 
 
 def save_settings(machines, templates):
-    """JSON 파일로 영구 저장"""
     try:
         data = {"machines": machines, "templates": templates}
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
@@ -100,37 +101,101 @@ def save_settings(machines, templates):
         return False
 
 
-# 4. 통합 문구 생성 (이제 templates 인자도 받음)
+# 4. 💡 [신규] 업체명 정규화 - 위치/일정 꼬리표 제거하여 그룹키 생성
+def normalize_company_name(name):
+    """
+    예) '㈜파커스 (주식회사 제이앤테크 유지보수위탁)대진디엠디/ 3층 오른쪽매월방문'
+        → '㈜파커스 (주식회사 제이앤테크 유지보수위탁)대진디엠디'
+    """
+    if not name:
+        return name
+    # /, ／ 이후 위치 정보 제거
+    name = re.split(r'[/／]', name, maxsplit=1)[0]
+    # 일정 키워드(매월마감/매월방문 등) 이후 제거 - 가장 빠른 위치 기준
+    schedule_keywords = ['매월마감', '매월방문', '매주방문', '매주마감',
+                         '격주방문', '격주마감', '월말마감', '월말방문']
+    earliest = len(name)
+    for kw in schedule_keywords:
+        idx = name.find(kw)
+        if 0 <= idx < earliest:
+            earliest = idx
+    if earliest < len(name):
+        name = name[:earliest]
+    # 양 끝 공백/특수문자 정리
+    name = re.sub(r'[\s·,]+$', '', name).strip()
+    return name
+
+
+# 5. 💡 [신규] 전화번호 + 담당자 이름/직책 추출
+def extract_contacts(block):
+    """블록에서 [{'phone': '01012345678', 'label': '홍길동 과장'}, ...] 반환"""
+    results = []
+    seen = set()
+    
+    for m in re.finditer(PHONE_RE, block):
+        phone_raw = m.group(0)
+        clean = re.sub(r'[^0-9]', '', phone_raw)
+        if clean in seen:
+            continue
+        seen.add(clean)
+        
+        before = block[max(0, m.start() - 50):m.start()]
+        after = block[m.end():min(len(block), m.end() + 30)]
+        
+        label = ""
+        
+        # 패턴 A: "이름 직책 [구분자] 전화번호"
+        ma = re.search(rf'(?:^|[\s/,:·\-])({NAME_RE})\s*({TITLE_RE})\s*[:\-\s/]*$', before)
+        if ma and ma.group(1) not in NON_NAME_WORDS:
+            label = f"{ma.group(1)} {ma.group(2)}"
+        else:
+            # 패턴 B: "직책 이름 [구분자] 전화번호"
+            ma = re.search(rf'({TITLE_RE})\s+({NAME_RE})\s*[:\-\s/]*$', before)
+            if ma and ma.group(2) not in NON_NAME_WORDS:
+                label = f"{ma.group(2)} {ma.group(1)}"
+            else:
+                # 패턴 C: "직책 [구분자] 전화번호" (이름 없음)
+                ma = re.search(rf'(?:^|[\s/,:·\-])({TITLE_RE})\s*[:\-\s/]*$', before)
+                if ma:
+                    label = ma.group(1)
+                else:
+                    # 패턴 D: "이름 [구분자] 전화번호"
+                    ma = re.search(rf'(?:^|[\s/,:·\-])({NAME_RE})\s*[:\-\s/]*$', before)
+                    if ma and ma.group(1) not in NON_NAME_WORDS:
+                        label = ma.group(1)
+        
+        # 앞에서 못 찾으면 뒤쪽 시도
+        if not label:
+            ma = re.search(rf'^\s*[:\-\s/,·]*\s*({NAME_RE})(?:\s+({TITLE_RE}))?', after)
+            if ma and ma.group(1) not in NON_NAME_WORDS:
+                label = ma.group(1)
+                if ma.group(2):
+                    label = f"{label} {ma.group(2)}"
+        
+        results.append({"phone": clean, "label": label})
+    
+    return results
+
+
+# 6. 통합 문구 생성
 def build_message(machines_list, machine_formats, templates):
-    """기종 리스트 → 통합 문구 생성. 동일 모델은 자동 묶음."""
     model_counts = OrderedDict()
     for m in machines_list:
         model_counts[m] = model_counts.get(m, 0) + 1
     
     unique_models = list(model_counts.keys())
     total_units = sum(model_counts.values())
-    
     single_closing = templates.get("single_closing", DEFAULT_TEMPLATES["single_closing"])
     
-    # ── 단일 기기 ──
     if len(unique_models) == 1 and total_units == 1:
         m = unique_models[0]
         how = machine_formats.get(m, txt_default)
-        # 특수 케이스 (이미 인사말 포함된 안내 문구는 그대로 사용)
         if "안녕하세요" in how or "사용량확인차" in how:
             return f"{how}\n(기종: {m})\n{single_closing}"
-        
         greeting = templates.get("single_greeting", DEFAULT_TEMPLATES["single_greeting"])
-        return (
-            f"{greeting}\n\n"
-            f"▶ 기종: {m}\n"
-            f"▶ 방법: {how}\n\n"
-            f"{single_closing}"
-        )
+        return f"{greeting}\n\n▶ 기종: {m}\n▶ 방법: {how}\n\n{single_closing}"
     
-    # ── 여러 대 통합 ──
     raw_greeting = templates.get("multi_greeting", DEFAULT_TEMPLATES["multi_greeting"])
-    # {total} 치환 (사용자가 다른 잘못된 플레이스홀더를 써도 안전)
     greeting = raw_greeting.replace("{total}", str(total_units))
     closing = templates.get("multi_closing", DEFAULT_TEMPLATES["multi_closing"])
     
@@ -144,17 +209,20 @@ def build_message(machines_list, machine_formats, templates):
     return "\n".join(lines)
 
 
-# 5. 세션 상태 초기화
+# 7. 세션 상태 초기화
 if "current_page" not in st.session_state:
     st.session_state.current_page = "main"
 
 if "custom_formats" not in st.session_state or "custom_templates" not in st.session_state:
-    loaded_machines, loaded_templates = load_settings()
-    st.session_state.custom_formats = loaded_machines
-    st.session_state.custom_templates = loaded_templates
+    loaded_m, loaded_t = load_settings()
+    st.session_state.custom_formats = loaded_m
+    st.session_state.custom_templates = loaded_t
+
+if "contact_labels" not in st.session_state:
+    st.session_state.contact_labels = {}  # clean_phone -> 'name title'
 
 
-# 6. 상단 헤더 + 페이지 이동 버튼
+# 8. 상단 헤더 + 네비게이션
 nav_col1, nav_col2 = st.columns([7, 2])
 with nav_col1:
     st.title("퍼스트전산 마감 도우미 📱")
@@ -176,28 +244,22 @@ with nav_col2:
 # ============================================================
 if st.session_state.current_page == "settings":
     st.caption("문자 양식과 기종별 안내 문구를 수정합니다. **저장하기**를 눌러야 다음 접속 시에도 유지됩니다.")
-    
-    # 사용자 편집 임시 dict
     edited_templates = st.session_state.custom_templates.copy()
     edited_machines = st.session_state.custom_formats.copy()
     
-    # ── 💡 [신규] 문자 전체 양식 편집 섹션 ──
     with st.expander("📝 문자 양식 (인사말/마무리말) 편집", expanded=True):
-        st.caption("💡 통합 발송 인사말에서 `{total}`을 쓰면 자동으로 기기 총 대수로 치환됩니다. (예: 3 → '총 3대 기기')")
+        st.caption("💡 통합 발송 인사말에서 `{total}`을 쓰면 자동으로 기기 총 대수로 치환됩니다.")
         
         st.markdown("##### 📄 단일 기기 발송용")
         edited_templates["single_greeting"] = st.text_area(
             "인사말 (단일)",
             value=edited_templates.get("single_greeting", DEFAULT_TEMPLATES["single_greeting"]),
-            height=120,
-            key="edit_tpl_single_greeting",
-            help="단일 기기 마감 문자의 첫 부분에 들어갑니다. 그 아래에 '▶ 기종/방법' 줄이 자동 삽입됩니다."
+            height=120, key="edit_tpl_single_greeting"
         )
         edited_templates["single_closing"] = st.text_area(
             "마무리말 (단일)",
             value=edited_templates.get("single_closing", DEFAULT_TEMPLATES["single_closing"]),
-            height=70,
-            key="edit_tpl_single_closing"
+            height=70, key="edit_tpl_single_closing"
         )
         
         st.markdown("---")
@@ -205,29 +267,25 @@ if st.session_state.current_page == "settings":
         edited_templates["multi_greeting"] = st.text_area(
             "인사말 (통합) — `{total}` 사용 가능",
             value=edited_templates.get("multi_greeting", DEFAULT_TEMPLATES["multi_greeting"]),
-            height=120,
-            key="edit_tpl_multi_greeting",
-            help="동일 업체에 기기가 여러 대일 때 사용됩니다. {total}은 기기 총 대수로 치환됩니다."
+            height=120, key="edit_tpl_multi_greeting"
         )
         edited_templates["multi_closing"] = st.text_area(
             "마무리말 (통합)",
             value=edited_templates.get("multi_closing", DEFAULT_TEMPLATES["multi_closing"]),
-            height=70,
-            key="edit_tpl_multi_closing"
+            height=70, key="edit_tpl_multi_closing"
         )
         
-        # 실시간 미리보기
         st.markdown("---")
         st.markdown("##### 📱 실시간 미리보기")
-        prev_c1, prev_c2 = st.columns(2)
-        with prev_c1:
+        c1, c2 = st.columns(2)
+        with c1:
             st.caption("🟢 단일 기기 예시 (D400)")
             try:
                 p1 = build_message(["D400"], edited_machines, edited_templates)
             except Exception as e:
                 p1 = f"⚠️ 양식 오류: {e}"
             st.code(p1, language=None)
-        with prev_c2:
+        with c2:
             st.caption("🔵 통합 발송 예시 (D400 2대 + C2263)")
             try:
                 p2 = build_message(["D400", "D400", "C2263"], edited_machines, edited_templates)
@@ -235,7 +293,6 @@ if st.session_state.current_page == "settings":
                 p2 = f"⚠️ 양식 오류: {e}"
             st.code(p2, language=None)
     
-    # ── 기종별 안내 문구 편집 섹션 ──
     machine_groups = {
         "📠 신도리코 (N/D 시리즈)": ["N500", "N501", "N502", "N600", "N601", "D320", "D400", "D410", "D420", "D450", "D460", "D470"],
         "📠 교세라 ECOSYS": ["MA2100", "M5526", "M5521", "ECOSYS"],
@@ -252,27 +309,23 @@ if st.session_state.current_page == "settings":
             for m in machines:
                 if m in edited_machines:
                     edited_machines[m] = st.text_area(
-                        f"**{m}**",
-                        value=edited_machines[m],
-                        height=100,
-                        key=f"edit_setting_{m}"
+                        f"**{m}**", value=edited_machines[m],
+                        height=100, key=f"edit_setting_{m}"
                     )
     
     st.markdown("---")
-    
     col_s1, col_s2, _ = st.columns([2, 2, 4])
     with col_s1:
         if st.button("💾 변경사항 저장", type="primary", use_container_width=True):
             st.session_state.custom_formats = edited_machines
             st.session_state.custom_templates = edited_templates
             if save_settings(edited_machines, edited_templates):
-                st.success("✅ 저장 완료! 메인페이지에 즉시 반영됩니다.")
+                st.success("✅ 저장 완료!")
     with col_s2:
         if st.button("🔄 기본값 복원", use_container_width=True):
             st.session_state.custom_formats = DEFAULT_FORMATS.copy()
             st.session_state.custom_templates = DEFAULT_TEMPLATES.copy()
             save_settings(DEFAULT_FORMATS, DEFAULT_TEMPLATES)
-            # 위젯 상태 클리어
             for m in DEFAULT_FORMATS:
                 k = f"edit_setting_{m}"
                 if k in st.session_state: del st.session_state[k]
@@ -287,19 +340,14 @@ if st.session_state.current_page == "settings":
 # 메인 페이지
 # ============================================================
 else:
-    st.caption("카톡 내용을 복사해 넣으면 거래처별로 마감 문자를 생성합니다. **동일 업체명은 한 통으로 자동 통합됩니다.**")
+    st.caption("카톡 내용을 붙여넣으면 거래처별로 마감 문자를 생성합니다. **동일 업체명은 자동 통합되고 담당자 이름·직책도 함께 표시됩니다.**")
     
     st.markdown(
-        """
-        <style>
+        """<style>
         div[data-testid="stTextArea"] textarea {
-            overflow-y: hidden !important;
-            height: auto !important;
-            min-height: 200px !important;
-            max-height: none !important;
-        }
-        </style>
-        """,
+            overflow-y: hidden !important; height: auto !important;
+            min-height: 200px !important; max-height: none !important;
+        }</style>""",
         unsafe_allow_html=True
     )
     
@@ -309,6 +357,7 @@ else:
                           if k.startswith(("final_nm_", "final_ph_", "final_mc_", "nm_", "ph_", "mc_"))]
         for k in keys_to_delete:
             del st.session_state[k]
+        st.session_state.contact_labels = {}
     
     raw_text = st.text_area("카톡 내용 붙여넣기:", key="text_input_area")
     
@@ -321,22 +370,19 @@ else:
     st.markdown("---")
     
     if raw_text and raw_text.strip():
-        # ── 블록 분리 ──
+        # 블록 분리
         split_pattern = r'((?<=\n)\d+(?:\s*,\s*)\d*[A-Z]*)|(^\d+(?:\s*,\s*)\d*[A-Z]*)'
         raw_parts = re.split(split_pattern, raw_text)
         
         blocks, current_block = [], ""
         for part in raw_parts:
-            if part is None:
-                continue
+            if part is None: continue
             if re.match(r'^\d+(?:\s*,\s*)', part.strip()):
-                if current_block.strip():
-                    blocks.append(current_block.strip())
+                if current_block.strip(): blocks.append(current_block.strip())
                 current_block = part
             else:
                 current_block += part
-        if current_block.strip():
-            blocks.append(current_block.strip())
+        if current_block.strip(): blocks.append(current_block.strip())
         
         valid_blocks = [b.strip() for b in blocks if len(b.strip()) > 5 and re.match(r'^\d+(?:\s*,\s*)', b.strip())]
         if not valid_blocks:
@@ -345,15 +391,17 @@ else:
         machine_options = list(st.session_state.custom_formats.keys())
         exclude_machines = ["기본 기종", "X3220NR", "X-9201", "SL-"]
         
-        # ── 블록별 정보 추출 ──
         sms_data_list = []
         for i, block in enumerate(valid_blocks, 1):
-            p_matches = re.findall(r'01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}', block)
-            clean_phones = []
-            for p in p_matches:
-                c_p = re.sub(r'[^0-9]', '', p)
-                if c_p not in clean_phones:
-                    clean_phones.append(c_p)
+            # 💡 [개선] 담당자 라벨까지 추출
+            contacts = extract_contacts(block)
+            clean_phones = [c["phone"] for c in contacts]
+            
+            # 담당자 라벨 전역 저장 (덮어쓰지 않음 - 먼저 감지된 것 유지)
+            for c in contacts:
+                if c["label"] and c["phone"] not in st.session_state.contact_labels:
+                    st.session_state.contact_labels[c["phone"]] = c["label"]
+            
             detected_phone_str = ", ".join(clean_phones) if clean_phones else ""
             
             lines = [l.strip() for l in block.split('\n') if l.strip()]
@@ -382,43 +430,84 @@ else:
             
             sms_data_list.append({"index": i, "block_raw": block})
         
-        # ── 업체명 기준 그룹화 ──
-        grouped = OrderedDict()
+        # 💡 [개선] 정규화된 업체명으로 그룹화
+        grouped = OrderedDict()  # normalized_name -> {display_name, phones, machines, indices}
+        
         for s_info in sms_data_list:
             i = s_info["index"]
             cur_name = st.session_state.get(f"nm_{i}_first", st.session_state[f"final_nm_{i}"]).strip()
             cur_phone = st.session_state.get(f"ph_{i}_first", st.session_state[f"final_ph_{i}"])
             cur_machine = st.session_state.get(f"mc_{i}_first", st.session_state[f"final_mc_{i}"])
             
-            if cur_name not in grouped:
-                grouped[cur_name] = {"phones": [], "machines": [], "indices": []}
+            # 그룹 키는 정규화된 이름
+            group_key = normalize_company_name(cur_name)
+            if not group_key:
+                group_key = cur_name  # 정규화 결과가 빈 문자열이면 원본 사용
+            
+            if group_key not in grouped:
+                grouped[group_key] = {
+                    "display_name": group_key,
+                    "phones": [],
+                    "machines": [],
+                    "indices": [],
+                    "original_names": []
+                }
             
             for p in re.split(r'[\s,]+', cur_phone):
                 p_clean = re.sub(r'[^0-9]', '', p.strip())
-                if p_clean and p_clean not in grouped[cur_name]["phones"]:
-                    grouped[cur_name]["phones"].append(p_clean)
-            grouped[cur_name]["machines"].append(cur_machine)
-            grouped[cur_name]["indices"].append(i)
+                if p_clean and p_clean not in grouped[group_key]["phones"]:
+                    grouped[group_key]["phones"].append(p_clean)
+            grouped[group_key]["machines"].append(cur_machine)
+            grouped[group_key]["indices"].append(i)
+            if cur_name != group_key and cur_name not in grouped[group_key]["original_names"]:
+                grouped[group_key]["original_names"].append(cur_name)
         
-        group_names = list(grouped.keys())
-        total_groups = len(group_names)
-        total_machines = sum(len(grouped[n]["machines"]) for n in group_names)
+        group_keys = list(grouped.keys())
+        total_groups = len(group_keys)
+        total_machines = sum(len(grouped[n]["machines"]) for n in group_keys)
         
         st.subheader(f"🚀 거래처별 발송 버튼 (총 {total_groups}개 업체 / {total_machines}대 기기)")
-        st.info("💡 동일 업체명은 자동으로 **한 통의 문자**로 통합됩니다. 버튼을 누르면 번호 선택 팝업이 표시됩니다.")
+        st.info("💡 동일 업체는 위치(/뒤) 정보를 무시하고 자동 통합됩니다. 담당자 이름·직책이 함께 표시됩니다.")
+        
+        # 라벨이 있으면 함께 표시하는 헬퍼
+        def format_phone_with_name(phone):
+            label = st.session_state.contact_labels.get(phone, "")
+            if label:
+                # 보기 좋게 010-XXXX-XXXX 형식으로 변환
+                formatted_p = f"{phone[:3]}-{phone[3:7]}-{phone[7:]}" if len(phone) == 11 else phone
+                return f"👤 {label}  📞 {formatted_p}"
+            formatted_p = f"{phone[:3]}-{phone[3:7]}-{phone[7:]}" if len(phone) == 11 else phone
+            return f"📞 {formatted_p}"
         
         @st.dialog("📱 문자 전송 대상 및 내용 확인")
-        def show_send_popup(name, phones_list, msg):
+        def show_send_popup(name, phones_list, msg, original_names=None):
             st.warning("⚠️ 수신 번호를 확인 후 하단의 최종 전송 버튼을 눌러주세요.")
             st.write(f"**업체명:** {name}")
             
+            # 원본 이름(위치 정보) 펼침
+            if original_names:
+                with st.expander(f"📍 통합된 위치/지점 ({len(original_names)}개)", expanded=False):
+                    for n in original_names:
+                        st.markdown(f"- {n}")
+            
             selected_number = ""
             if len(phones_list) > 1:
-                st.info(f"💡 번호 {len(phones_list)}개 발견. 발송할 번호를 선택해 주세요:")
-                selected_number = st.radio("수신 연락처 선택", options=phones_list, index=0)
+                st.info(f"💡 번호 {len(phones_list)}개 발견. 발송할 담당자를 선택해 주세요:")
+                selected_number = st.radio(
+                    "수신 연락처 선택",
+                    options=phones_list,
+                    format_func=format_phone_with_name,
+                    index=0
+                )
             elif len(phones_list) == 1:
-                st.write(f"**수신 번호:** {phones_list[0]}")
-                selected_number = phones_list[0]
+                p = phones_list[0]
+                label = st.session_state.contact_labels.get(p, "")
+                formatted_p = f"{p[:3]}-{p[3:7]}-{p[7:]}" if len(p) == 11 else p
+                if label:
+                    st.write(f"**수신:** 👤 {label}  📞 {formatted_p}")
+                else:
+                    st.write(f"**수신 번호:** 📞 {formatted_p}")
+                selected_number = p
             else:
                 st.error("❌ 등록된 수신 번호가 없습니다.")
             
@@ -427,20 +516,24 @@ else:
             
             if selected_number:
                 target_num = re.sub(r'[^0-9]', '', selected_number)
+                target_label = st.session_state.contact_labels.get(target_num, "")
+                btn_text = f"✅ [{target_label}] 에게 전송" if target_label else f"✅ [{target_num}] 번호로 전송"
                 st.markdown(
                     f'<a href="sms:{target_num}?body={urllib.parse.quote(msg)}" target="_self" '
                     f'style="display: block; width: 100%; text-align: center; padding: 0.8rem; '
                     f'background-color: #00CC66; color: white; text-decoration: none; '
                     f'border-radius: 8px; font-weight: bold; font-size: 18px; margin-top: 15px;">'
-                    f'✅ [{target_num}] 번호로 즉시 보내기</a>',
+                    f'{btn_text}</a>',
                     unsafe_allow_html=True
                 )
         
         btn_cols = st.columns(4)
-        for g_idx, name in enumerate(group_names):
-            info = grouped[name]
+        for g_idx, gkey in enumerate(group_keys):
+            info = grouped[gkey]
             phones = info["phones"]
             machines = info["machines"]
+            display_name = info["display_name"]
+            original_names = info["original_names"]
             
             msg = build_message(machines, st.session_state.custom_formats, st.session_state.custom_templates)
             
@@ -451,31 +544,50 @@ else:
                     n_phones = len(phones)
                     
                     if n_machines > 1 and n_phones > 1:
-                        btn_label = f"💬 {name} (기기 {n_machines}대 / 번호 {n_phones}개)"
+                        btn_label = f"💬 {display_name} (기기 {n_machines}대 / 번호 {n_phones}개)"
                     elif n_machines > 1:
-                        btn_label = f"💬 {name} (기기 {n_machines}대 통합)"
+                        btn_label = f"💬 {display_name} (기기 {n_machines}대 통합)"
                     elif n_phones > 1:
-                        btn_label = f"💬 {name} (번호 {n_phones}개)"
+                        btn_label = f"💬 {display_name} (번호 {n_phones}개)"
                     else:
-                        btn_label = f"💬 {name} 발송"
+                        btn_label = f"💬 {display_name} 발송"
                     
                     if st.button(btn_label, key=f"group_btn_{g_idx}", use_container_width=True):
-                        show_send_popup(name, phones, msg)
+                        show_send_popup(display_name, phones, msg, original_names)
                 else:
-                    st.button(f"❌ {name} (번호없음)", disabled=True, use_container_width=True, key=f"group_disabled_btn_{g_idx}")
+                    st.button(f"❌ {display_name} (번호없음)", disabled=True,
+                              use_container_width=True, key=f"group_disabled_btn_{g_idx}")
         
         st.markdown("---")
         st.subheader("🔍 상세 정보 편집")
-        st.caption("💡 **업체명을 동일하게 수정하면 자동으로 통합됩니다.** 수정 즉시 위의 발송 버튼이 갱신됩니다.")
+        st.caption("💡 업체명에서 `/` 뒤 위치 정보와 `매월마감`/`매월방문` 키워드는 자동 무시되어 통합됩니다.")
         
         for s_info in sms_data_list:
             i = s_info["index"]
             with st.container():
                 col1, col2, col3 = st.columns([2, 1.5, 1])
                 with col1:
-                    st.text_input(f"업체명 ({i})", value=st.session_state[f"final_nm_{i}"], key=f"nm_{i}_first")
+                    st.text_input(f"업체명 ({i})",
+                                  value=st.session_state[f"final_nm_{i}"], key=f"nm_{i}_first")
+                    # 그룹키 미리보기
+                    norm = normalize_company_name(st.session_state.get(f"nm_{i}_first", st.session_state[f"final_nm_{i}"]))
+                    if norm and norm != st.session_state.get(f"nm_{i}_first", st.session_state[f"final_nm_{i}"]):
+                        st.caption(f"🔗 통합 그룹키: **{norm}**")
                 with col2:
-                    st.text_input(f"연락처 ({i}) - 쉼표로 구분", value=st.session_state[f"final_ph_{i}"], key=f"ph_{i}_first")
+                    st.text_input(f"연락처 ({i}) - 쉼표로 구분",
+                                  value=st.session_state[f"final_ph_{i}"], key=f"ph_{i}_first")
+                    # 담당자 라벨 표시
+                    phones_in_block = re.split(r'[\s,]+', st.session_state.get(f"ph_{i}_first", ""))
+                    labels_info = []
+                    for p in phones_in_block:
+                        p_clean = re.sub(r'[^0-9]', '', p.strip())
+                        if p_clean:
+                            lbl = st.session_state.contact_labels.get(p_clean, "")
+                            if lbl:
+                                fp = f"{p_clean[:3]}-{p_clean[3:7]}-{p_clean[7:]}" if len(p_clean) == 11 else p_clean
+                                labels_info.append(f"{lbl}({fp})")
+                    if labels_info:
+                        st.caption("👤 " + " · ".join(labels_info))
                 with col3:
                     d_idx = machine_options.index(st.session_state[f"final_mc_{i}"]) if st.session_state[f"final_mc_{i}"] in machine_options else machine_options.index("기본 기종")
                     st.selectbox(f"기종 ({i})", options=machine_options, index=d_idx, key=f"mc_{i}_first")
@@ -487,4 +599,4 @@ else:
                 st.code(single_msg, language=None)
                 st.markdown("<br>", unsafe_allow_html=True)
     elif analyze_clicked:
-        st.warning("⚠️ 붙여넣은 카톡 내용이 비어있습니다. 내용을 입력한 후 버튼을 눌러주세요.")
+        st.warning("⚠️ 붙여넣은 카톡 내용이 비어있습니다.")
