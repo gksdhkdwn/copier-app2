@@ -215,7 +215,7 @@ with tab1:
             cur_name = st.session_state.get(f"nm_{i}_f", st.session_state[f"final_nm_{i}"])
             cur_phones = st.session_state.get(f"phs_{i}_f", st.session_state[f"final_phs_{i}"])
             cur_region = st.session_state.get(f"rg_{i}_f", st.session_state[f"final_region_{i}"])
-            cur_machines = st.session_state[f"mcs_{i}_f", st.session_state[f"final_mcs_{i}"])
+            cur_machines = st.session_state[st.session_state[f"final_mcs_{i}"]]
             
             total_devices = len(cur_machines)
             
