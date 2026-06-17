@@ -3,6 +3,7 @@ import re
 import urllib.parse
 import json
 import os
+import copy  # [수정] 지역별 독립적 데이터 분리를 위해 copy 모듈 도입
 from collections import OrderedDict
 
 # 1. 페이지 기본 설정
@@ -123,8 +124,8 @@ def load_settings():
                 
                 if "machines" in loaded or "templates" in loaded or any(k in DEFAULT_FORMATS for k in loaded.keys()):
                     migrated = {}
-                    machines = DEFAULT_FORMATS.copy()
-                    templates = DEFAULT_TEMPLATES.copy()
+                    machines = copy.deepcopy(DEFAULT_FORMATS)
+                    templates = copy.deepcopy(DEFAULT_TEMPLATES)
                     if "machines" in loaded: machines.update(loaded["machines"])
                     if "templates" in loaded: templates.update(loaded["templates"])
                     migrated["공통 지역"] = {"machines": machines, "templates": templates}
@@ -135,8 +136,8 @@ def load_settings():
     
     return {
         "공통 지역": {
-            "machines": DEFAULT_FORMATS.copy(),
-            "templates": DEFAULT_TEMPLATES.copy()
+            "machines": copy.deepcopy(DEFAULT_FORMATS),
+            "templates": copy.deepcopy(DEFAULT_TEMPLATES)
         }
     }
 
@@ -317,22 +318,22 @@ active_templates = st.session_state.all_settings[current_region]["templates"]
 
 
 # ============================================================
-# 설정 페이지 (소문자 st.expander 오타 전면 교정 완료)
+# 설정 페이지 (지역별 완벽한 깊은 복사 독립 관리 적용)
 # ============================================================
 if st.session_state.current_page == "settings":
     st.subheader(f"🛠️ [{current_region}] 등급별 양식 관리 및 프로필 설정")
     st.caption("선택한 지역의 등급별(v,ss급 vs s,nn,n급) 단일/여러기기 문자 양식을 커스텀 수정 및 저장합니다.")
     
-    # [버그 수정] 대문자 St.expander -> 소문자 st.expander 교정
     with st.expander("🌍 지역(프로필) 생성 및 삭제 관리", expanded=False):
         st.markdown("##### ➕ 새로운 지역 추가")
         new_reg_name = st.text_input("새 지역/담당자 이름 입력", key="new_region_input_text")
         if st.button("🚀 신규 지역 프로필 생성", type="secondary"):
             if new_reg_name.strip():
                 if new_reg_name.strip() not in st.session_state.all_settings:
+                    # [수정] 신규 생성 시에도 deepcopy를 통해 완전 독립된 공간 할당
                     st.session_state.all_settings[new_reg_name.strip()] = {
-                        "machines": DEFAULT_FORMATS.copy(),
-                        "templates": DEFAULT_TEMPLATES.copy()
+                        "machines": copy.deepcopy(DEFAULT_FORMATS),
+                        "templates": copy.deepcopy(DEFAULT_TEMPLATES)
                     }
                     save_settings(st.session_state.all_settings)
                     st.session_state.selected_region = new_reg_name.strip()
@@ -352,10 +353,10 @@ if st.session_state.current_page == "settings":
             st.success("✅ 프로필이 정상 삭제되었습니다.")
             st.rerun()
 
-    edited_templates = active_templates.copy()
-    edited_machines = active_machines.copy()
+    # [수정] 기존 .copy() 방식에서 copy.deepcopy() 구조로 전면 전환 (독립적 개별 저장 버그 완벽 수정)
+    edited_templates = copy.deepcopy(active_templates)
+    edited_machines = copy.deepcopy(active_machines)
     
-    # [버그 수정] 대문자 St.expander -> 소문자 st.expander 교정
     with st.expander("📝 💎 [V, SS 급] 전용 문자 양식 편집", expanded=True):
         st.markdown("##### 📄 단일 기기 발송용 (V, SS급)")
         edited_templates["v_single_greeting"] = st.text_area(
@@ -372,7 +373,6 @@ if st.session_state.current_page == "settings":
             "마무리말 (통합 - V/SS)", value=edited_templates.get("v_multi_closing", DEFAULT_TEMPLATES["v_multi_closing"]), key="v_mc"
         )
 
-    # [버그 수정] 대문자 St.expander -> 소문자 st.expander 교정
     with st.expander("📝 🟢 [S, NN, N 급] 전용 문자 양식 편집", expanded=True):
         st.markdown("##### 📄 단일 기기 발송용 (S/NN/N급)")
         edited_templates["s_single_greeting"] = st.text_area(
@@ -402,7 +402,6 @@ if st.session_state.current_page == "settings":
     
     st.markdown(f"### 🔧 [{current_region}] 기종별 안내 문구 (방법 설명)")
     for group_name, machines in machine_groups.items():
-        # [버그 수정] 대문자 St.expander -> 소문자 st.expander 교정
         with st.expander(group_name, expanded=False):
             for m in machines:
                 if m in edited_machines:
@@ -414,17 +413,18 @@ if st.session_state.current_page == "settings":
     col_s1, col_s2, _ = st.columns([2, 2, 4])
     with col_s1:
         if st.button("💾 변경사항 저장", type="primary", use_container_width=True):
-            st.session_state.all_settings[current_region]["machines"] = edited_machines
-            st.session_state.all_settings[current_region]["templates"] = edited_templates
+            # [수정] 해당 선택지역 방에만 완벽히 독립된 데이터 구조로 깊은 저장
+            st.session_state.all_settings[current_region]["machines"] = copy.deepcopy(edited_machines)
+            st.session_state.all_settings[current_region]["templates"] = copy.deepcopy(edited_templates)
             if save_settings(st.session_state.all_settings):
-                st.success("✅ 선택 지역의 등급별 세분화 설정 저장 완료!")
+                st.success(f"✅ [{current_region}] 지역의 전용 문구 세트 독립 저장 완료!")
                 st.rerun()
     with col_s2:
         if st.button("🔄 현재 지역 기본값 초기화", use_container_width=True):
-            st.session_state.all_settings[current_region]["machines"] = DEFAULT_FORMATS.copy()
-            st.session_state.all_settings[current_region]["templates"] = DEFAULT_TEMPLATES.copy()
+            st.session_state.all_settings[current_region]["machines"] = copy.deepcopy(DEFAULT_FORMATS)
+            st.session_state.all_settings[current_region]["templates"] = copy.deepcopy(DEFAULT_TEMPLATES)
             save_settings(st.session_state.all_settings)
-            st.success("✅ 기본값으로 원복되었습니다.")
+            st.success(f"✅ [{current_region}] 프로필 문구가 초기 기본값으로 원복되었습니다.")
             st.rerun()
 
 
