@@ -106,7 +106,6 @@ def _find_name_before(before):
                     return cand
     return None
 
-# [버그 수정됨] 안전한 데이터 로드 함수
 def load_settings():
     try:
         if os.path.exists(SETTINGS_FILE):
@@ -114,7 +113,6 @@ def load_settings():
                 loaded = json.load(f)
             
             if isinstance(loaded, dict) and loaded:
-                # 과거 단일 포맷을 다중 지역 포맷으로 안전하게 마이그레이션
                 if "machines" in loaded or "templates" in loaded:
                     migrated = {}
                     migrated["공통 지역"] = {
@@ -123,7 +121,6 @@ def load_settings():
                     }
                     return migrated
 
-                # 데이터 누락 방지: 각 지역별로 빈 멘트가 있으면 기본값으로 채워줌
                 for rk in loaded:
                     if "machines" not in loaded[rk]:
                         loaded[rk]["machines"] = copy.deepcopy(DEFAULT_FORMATS)
@@ -142,7 +139,6 @@ def load_settings():
     except Exception:
         pass
     
-    # 파일이 없거나 에러 발생 시 기본 셋업
     return {
         "공통 지역": {
             "machines": copy.deepcopy(DEFAULT_FORMATS),
@@ -159,34 +155,53 @@ def save_settings(all_settings):
         st.error(f"설정 저장 실패: {e}")
         return False
 
-def parse_company_and_grade(raw_name):
-    if not raw_name:
-        return "s_group", ""
+# ----------------------------------------------------
+# [수정됨] 완벽하게 V/SS 와 S/NN/N 을 캐치하는 함수
+# ----------------------------------------------------
+def parse_company_and_grade(first_line):
+    if not first_line:
+        return "s_group", "거래처 확인 바람"
     
+    # 1. 맨 앞 숫자 배열 뒤에 붙어있는 알파벳 등급(V, SS, S, NN, N)을 가장 먼저 낚아챔
+    # 예: "17, 17S㈜피치스..." -> group(1) = "S", group(2) = "㈜피치스..."
+    match = re.match(r'^\d+(?:\s*,\s*)\d*([a-zA-Z]+)?(.*)', first_line)
+    
+    raw_grade = ""
+    raw_name = first_line
+    
+    if match:
+        raw_grade = (match.group(1) or "").upper()
+        raw_name = match.group(2).strip()
+    else:
+        # 번호 없이 바로 SS㈜피치스 이렇게 시작하는 예외 처리
+        alt_match = re.match(r'^(V|SS|S|NN|N)(.+)$', first_line, re.IGNORECASE)
+        if alt_match:
+            raw_grade = alt_match.group(1).upper()
+            raw_name = alt_match.group(2).strip()
+
+    # 2. V, SS 인지 판단하여 그룹 배정
+    if raw_grade in ["V", "SS"]:
+        grade_group = "v_group"
+    else:
+        grade_group = "s_group" # S, NN, N 또는 없는 경우 전부 S그룹으로 편입
+        
+    # 3. 더러운 텍스트(매월마감, USAGE TRACKER 등) 깔끔하게 절삭
     name = re.split(r'[/／]', raw_name, maxsplit=1)[0]
-    schedule_keywords = ['매월마감', '매월방문', '매주방문', '매주마감', '격주방문', '격주마감', '월말마감', '월말방문']
+    schedule_keywords = ['매월마감', '매월방문', '매주방문', '매주마감', '격주방문', '격주마감', '월말마감', '월말방문', '분기마감', 'USAGE TRACKER', 'USAGE']
+    
     earliest = len(name)
     for kw in schedule_keywords:
         idx = name.find(kw)
         if 0 <= idx < earliest:
             earliest = idx
+            
     if earliest < len(name):
         name = name[:earliest]
+        
     name = re.sub(r'[\s·,]+$', '', name).strip()
     
-    grade_group = "s_group"
-    
-    match_v = re.match(r'^(v|ss)(.+)$', name, re.IGNORECASE)
-    match_s = re.match(r'^(s|nn|n)(.+)$', name, re.IGNORECASE)
-    
-    if match_v:
-        grade_group = "v_group"
-        name = match_v.group(2).strip()
-    elif match_s:
-        grade_group = "s_group"
-        name = match_s.group(2).strip()
-        
     return grade_group, name
+
 
 def extract_contacts(block):
     results = []
@@ -320,14 +335,13 @@ with nav_col3:
             st.session_state.current_page = "main"
             st.rerun()
 
-# 현재 선택된 지역의 활성화 데이터 바인딩
 current_region = st.session_state.selected_region
 active_machines = st.session_state.all_settings[current_region]["machines"]
 active_templates = st.session_state.all_settings[current_region]["templates"]
 
 
 # ============================================================
-# 설정 페이지 (지역별 완벽한 깊은 복사 독립 관리 및 고유 Key 할당)
+# 설정 페이지
 # ============================================================
 if st.session_state.current_page == "settings":
     st.subheader(f"🛠️ [{current_region}] 등급별 양식 관리 및 프로필 설정")
@@ -364,7 +378,6 @@ if st.session_state.current_page == "settings":
     edited_templates = copy.deepcopy(active_templates)
     edited_machines = copy.deepcopy(active_machines)
     
-    # [버그 수정됨] 위젯의 key 값에 f"_{current_region}" 을 붙여 지역 간 캐시 충돌을 원천 차단함
     with st.expander("📝 💎 [V, SS 급] 전용 문자 양식 편집", expanded=True):
         st.markdown("##### 📄 단일 기기 발송용 (V, SS급)")
         edited_templates["v_single_greeting"] = st.text_area(
@@ -501,13 +514,13 @@ else:
             detected_phone_str = ", ".join(clean_phones) if clean_phones else ""
             
             lines = [l.strip() for l in block.split('\n') if l.strip()]
-            detected_raw_name = "거래처 확인 바람"
+            
+            # [수정] 위에서 새롭게 고친 파서 함수 연동 구역
             if lines:
                 first_line = lines[0]
-                name_part = re.sub(r'^\d+(?:\s*,\s*)\d*[A-Za-z]*', '', first_line).strip()
-                detected_raw_name = name_part.split('매월마감')[0].strip() if name_part else first_line
-            
-            grade_group, detected_clean_name = parse_company_and_grade(detected_raw_name)
+                grade_group, detected_clean_name = parse_company_and_grade(first_line)
+            else:
+                grade_group, detected_clean_name = "s_group", "거래처 확인 바람"
             
             matched_machine = "기본 기종"
             block_lower = block.lower()
