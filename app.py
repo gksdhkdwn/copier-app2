@@ -3,7 +3,7 @@ import re
 import urllib.parse
 import json
 import os
-import copy  # [수정] 지역별 독립적 데이터 분리를 위해 copy 모듈 도입
+import copy  
 from collections import OrderedDict
 
 # 1. 페이지 기본 설정
@@ -106,6 +106,7 @@ def _find_name_before(before):
                     return cand
     return None
 
+# [버그 수정됨] 안전한 데이터 로드 함수
 def load_settings():
     try:
         if os.path.exists(SETTINGS_FILE):
@@ -113,27 +114,35 @@ def load_settings():
                 loaded = json.load(f)
             
             if isinstance(loaded, dict) and loaded:
-                first_key = list(loaded.keys())[0]
-                if isinstance(loaded[first_key], dict) and "machines" in loaded[first_key]:
-                    for rk in loaded:
+                # 과거 단일 포맷을 다중 지역 포맷으로 안전하게 마이그레이션
+                if "machines" in loaded or "templates" in loaded:
+                    migrated = {}
+                    migrated["공통 지역"] = {
+                        "machines": loaded.get("machines", copy.deepcopy(DEFAULT_FORMATS)),
+                        "templates": loaded.get("templates", copy.deepcopy(DEFAULT_TEMPLATES))
+                    }
+                    return migrated
+
+                # 데이터 누락 방지: 각 지역별로 빈 멘트가 있으면 기본값으로 채워줌
+                for rk in loaded:
+                    if "machines" not in loaded[rk]:
+                        loaded[rk]["machines"] = copy.deepcopy(DEFAULT_FORMATS)
+                    else:
+                        for mk in DEFAULT_FORMATS:
+                            if mk not in loaded[rk]["machines"]:
+                                loaded[rk]["machines"][mk] = DEFAULT_FORMATS[mk]
+                                
+                    if "templates" not in loaded[rk]:
+                        loaded[rk]["templates"] = copy.deepcopy(DEFAULT_TEMPLATES)
+                    else:
                         for tk in DEFAULT_TEMPLATES:
                             if tk not in loaded[rk]["templates"]:
-                                origin_key = "single_greeting" if "single_greeting" in tk else ("single_closing" if "single_closing" in tk else ("multi_greeting" if "multi_greeting" in tk else "multi_closing"))
-                                loaded[rk]["templates"][tk] = loaded[rk]["templates"].get(origin_key, DEFAULT_TEMPLATES[tk])
-                    return loaded
-                
-                if "machines" in loaded or "templates" in loaded or any(k in DEFAULT_FORMATS for k in loaded.keys()):
-                    migrated = {}
-                    machines = copy.deepcopy(DEFAULT_FORMATS)
-                    templates = copy.deepcopy(DEFAULT_TEMPLATES)
-                    if "machines" in loaded: machines.update(loaded["machines"])
-                    if "templates" in loaded: templates.update(loaded["templates"])
-                    migrated["공통 지역"] = {"machines": machines, "templates": templates}
-                    return migrated
+                                loaded[rk]["templates"][tk] = DEFAULT_TEMPLATES[tk]
                 return loaded
     except Exception:
         pass
     
+    # 파일이 없거나 에러 발생 시 기본 셋업
     return {
         "공통 지역": {
             "machines": copy.deepcopy(DEFAULT_FORMATS),
@@ -318,11 +327,11 @@ active_templates = st.session_state.all_settings[current_region]["templates"]
 
 
 # ============================================================
-# 설정 페이지 (지역별 완벽한 깊은 복사 독립 관리 적용)
+# 설정 페이지 (지역별 완벽한 깊은 복사 독립 관리 및 고유 Key 할당)
 # ============================================================
 if st.session_state.current_page == "settings":
     st.subheader(f"🛠️ [{current_region}] 등급별 양식 관리 및 프로필 설정")
-    st.caption("선택한 지역의 등급별(v,ss급 vs s,nn,n급) 단일/여러기기 문자 양식을 커스텀 수정 및 저장합니다.")
+    st.caption("선택한 지역의 등급별 단일/여러기기 문자 양식을 커스텀 수정 및 저장합니다.")
     
     with st.expander("🌍 지역(프로필) 생성 및 삭제 관리", expanded=False):
         st.markdown("##### ➕ 새로운 지역 추가")
@@ -330,7 +339,6 @@ if st.session_state.current_page == "settings":
         if st.button("🚀 신규 지역 프로필 생성", type="secondary"):
             if new_reg_name.strip():
                 if new_reg_name.strip() not in st.session_state.all_settings:
-                    # [수정] 신규 생성 시에도 deepcopy를 통해 완전 독립된 공간 할당
                     st.session_state.all_settings[new_reg_name.strip()] = {
                         "machines": copy.deepcopy(DEFAULT_FORMATS),
                         "templates": copy.deepcopy(DEFAULT_TEMPLATES)
@@ -353,40 +361,40 @@ if st.session_state.current_page == "settings":
             st.success("✅ 프로필이 정상 삭제되었습니다.")
             st.rerun()
 
-    # [수정] 기존 .copy() 방식에서 copy.deepcopy() 구조로 전면 전환 (독립적 개별 저장 버그 완벽 수정)
     edited_templates = copy.deepcopy(active_templates)
     edited_machines = copy.deepcopy(active_machines)
     
+    # [버그 수정됨] 위젯의 key 값에 f"_{current_region}" 을 붙여 지역 간 캐시 충돌을 원천 차단함
     with st.expander("📝 💎 [V, SS 급] 전용 문자 양식 편집", expanded=True):
         st.markdown("##### 📄 단일 기기 발송용 (V, SS급)")
         edited_templates["v_single_greeting"] = st.text_area(
-            "인사말 (단일 - V/SS)", value=edited_templates.get("v_single_greeting", DEFAULT_TEMPLATES["v_single_greeting"]), key="v_sg"
+            "인사말 (단일 - V/SS)", value=edited_templates.get("v_single_greeting", DEFAULT_TEMPLATES["v_single_greeting"]), key=f"v_sg_{current_region}"
         )
         edited_templates["v_single_closing"] = st.text_area(
-            "마무리말 (단일 - V/SS)", value=edited_templates.get("v_single_closing", DEFAULT_TEMPLATES["v_single_closing"]), key="v_sc"
+            "마무리말 (단일 - V/SS)", value=edited_templates.get("v_single_closing", DEFAULT_TEMPLATES["v_single_closing"]), key=f"v_sc_{current_region}"
         )
         st.markdown("##### 📚 여러 기기 통합 발송용 (V, SS급)")
         edited_templates["v_multi_greeting"] = st.text_area(
-            "인사말 (통합 - V/SS) — `{total}` 사용 가능", value=edited_templates.get("v_multi_greeting", DEFAULT_TEMPLATES["v_multi_greeting"]), key="v_mg"
+            "인사말 (통합 - V/SS) — `{total}` 사용 가능", value=edited_templates.get("v_multi_greeting", DEFAULT_TEMPLATES["v_multi_greeting"]), key=f"v_mg_{current_region}"
         )
         edited_templates["v_multi_closing"] = st.text_area(
-            "마무리말 (통합 - V/SS)", value=edited_templates.get("v_multi_closing", DEFAULT_TEMPLATES["v_multi_closing"]), key="v_mc"
+            "마무리말 (통합 - V/SS)", value=edited_templates.get("v_multi_closing", DEFAULT_TEMPLATES["v_multi_closing"]), key=f"v_mc_{current_region}"
         )
 
     with st.expander("📝 🟢 [S, NN, N 급] 전용 문자 양식 편집", expanded=True):
         st.markdown("##### 📄 단일 기기 발송용 (S/NN/N급)")
         edited_templates["s_single_greeting"] = st.text_area(
-            "인사말 (단일 - S/NN/N)", value=edited_templates.get("s_single_greeting", DEFAULT_TEMPLATES["s_single_greeting"]), key="s_sg"
+            "인사말 (단일 - S/NN/N)", value=edited_templates.get("s_single_greeting", DEFAULT_TEMPLATES["s_single_greeting"]), key=f"s_sg_{current_region}"
         )
         edited_templates["s_single_closing"] = st.text_area(
-            "마무리말 (단일 - S/NN/N)", value=edited_templates.get("s_single_closing", DEFAULT_TEMPLATES["s_single_closing"]), key="s_sc"
+            "마무리말 (단일 - S/NN/N)", value=edited_templates.get("s_single_closing", DEFAULT_TEMPLATES["s_single_closing"]), key=f"s_sc_{current_region}"
         )
         st.markdown("##### 📚 여러 기기 통합 발송용 (S/NN/N급)")
         edited_templates["s_multi_greeting"] = st.text_area(
-            "인사말 (통합 - S/NN/N) — `{total}` 사용 가능", value=edited_templates.get("s_multi_greeting", DEFAULT_TEMPLATES["s_multi_greeting"]), key="s_mg"
+            "인사말 (통합 - S/NN/N) — `{total}` 사용 가능", value=edited_templates.get("s_multi_greeting", DEFAULT_TEMPLATES["s_multi_greeting"]), key=f"s_mg_{current_region}"
         )
         edited_templates["s_multi_closing"] = st.text_area(
-            "마무리말 (통합 - S/NN/N)", value=edited_templates.get("s_multi_closing", DEFAULT_TEMPLATES["s_multi_closing"]), key="s_mc"
+            "마무리말 (통합 - S/NN/N)", value=edited_templates.get("s_multi_closing", DEFAULT_TEMPLATES["s_multi_closing"]), key=f"s_mc_{current_region}"
         )
         
     machine_groups = {
@@ -406,14 +414,13 @@ if st.session_state.current_page == "settings":
             for m in machines:
                 if m in edited_machines:
                     edited_machines[m] = st.text_area(
-                        f"**{m}**", value=edited_machines[m], height=100, key=f"edit_setting_{m}"
+                        f"**{m}**", value=edited_machines[m], height=100, key=f"edit_setting_{m}_{current_region}"
                     )
     
     st.markdown("---")
     col_s1, col_s2, _ = st.columns([2, 2, 4])
     with col_s1:
         if st.button("💾 변경사항 저장", type="primary", use_container_width=True):
-            # [수정] 해당 선택지역 방에만 완벽히 독립된 데이터 구조로 깊은 저장
             st.session_state.all_settings[current_region]["machines"] = copy.deepcopy(edited_machines)
             st.session_state.all_settings[current_region]["templates"] = copy.deepcopy(edited_templates)
             if save_settings(st.session_state.all_settings):
