@@ -155,15 +155,10 @@ def save_settings(all_settings):
         st.error(f"설정 저장 실패: {e}")
         return False
 
-# ----------------------------------------------------
-# [수정됨] 완벽하게 V/SS 와 S/NN/N 을 캐치하는 함수
-# ----------------------------------------------------
 def parse_company_and_grade(first_line):
     if not first_line:
         return "s_group", "거래처 확인 바람"
     
-    # 1. 맨 앞 숫자 배열 뒤에 붙어있는 알파벳 등급(V, SS, S, NN, N)을 가장 먼저 낚아챔
-    # 예: "17, 17S㈜피치스..." -> group(1) = "S", group(2) = "㈜피치스..."
     match = re.match(r'^\d+(?:\s*,\s*)\d*([a-zA-Z]+)?(.*)', first_line)
     
     raw_grade = ""
@@ -173,19 +168,16 @@ def parse_company_and_grade(first_line):
         raw_grade = (match.group(1) or "").upper()
         raw_name = match.group(2).strip()
     else:
-        # 번호 없이 바로 SS㈜피치스 이렇게 시작하는 예외 처리
         alt_match = re.match(r'^(V|SS|S|NN|N)(.+)$', first_line, re.IGNORECASE)
         if alt_match:
             raw_grade = alt_match.group(1).upper()
             raw_name = alt_match.group(2).strip()
 
-    # 2. V, SS 인지 판단하여 그룹 배정
     if raw_grade in ["V", "SS"]:
         grade_group = "v_group"
     else:
-        grade_group = "s_group" # S, NN, N 또는 없는 경우 전부 S그룹으로 편입
+        grade_group = "s_group"
         
-    # 3. 더러운 텍스트(매월마감, USAGE TRACKER 등) 깔끔하게 절삭
     name = re.split(r'[/／]', raw_name, maxsplit=1)[0]
     schedule_keywords = ['매월마감', '매월방문', '매주방문', '매주마감', '격주방문', '격주마감', '월말마감', '월말방문', '분기마감', 'USAGE TRACKER', 'USAGE']
     
@@ -375,8 +367,14 @@ if st.session_state.current_page == "settings":
             st.success("✅ 프로필이 정상 삭제되었습니다.")
             st.rerun()
 
-    edited_templates = copy.deepcopy(active_templates)
-    edited_machines = copy.deepcopy(active_machines)
+    # [핵심 수정] 입력 박스가 수정할 때마다 로컬 변수가 아니라 session_state를 직접 참조/수정하도록 바인딩
+    if f"edit_temp_{current_region}" not in st.session_state:
+        st.session_state[f"edit_temp_{current_region}"] = copy.deepcopy(active_templates)
+    if f"edit_mach_{current_region}" not in st.session_state:
+        st.session_state[f"edit_mach_{current_region}"] = copy.deepcopy(active_machines)
+        
+    edited_templates = st.session_state[f"edit_temp_{current_region}"]
+    edited_machines = st.session_state[f"edit_mach_{current_region}"]
     
     with st.expander("📝 💎 [V, SS 급] 전용 문자 양식 편집", expanded=True):
         st.markdown("##### 📄 단일 기기 발송용 (V, SS급)")
@@ -443,6 +441,9 @@ if st.session_state.current_page == "settings":
         if st.button("🔄 현재 지역 기본값 초기화", use_container_width=True):
             st.session_state.all_settings[current_region]["machines"] = copy.deepcopy(DEFAULT_FORMATS)
             st.session_state.all_settings[current_region]["templates"] = copy.deepcopy(DEFAULT_TEMPLATES)
+            # 초기화할 때 세션 상의 임시 저장소도 함께 리셋해 줍니다.
+            st.session_state[f"edit_temp_{current_region}"] = copy.deepcopy(DEFAULT_TEMPLATES)
+            st.session_state[f"edit_mach_{current_region}"] = copy.deepcopy(DEFAULT_FORMATS)
             save_settings(st.session_state.all_settings)
             st.success(f"✅ [{current_region}] 프로필 문구가 초기 기본값으로 원복되었습니다.")
             st.rerun()
@@ -515,7 +516,6 @@ else:
             
             lines = [l.strip() for l in block.split('\n') if l.strip()]
             
-            # [수정] 위에서 새롭게 고친 파서 함수 연동 구역
             if lines:
                 first_line = lines[0]
                 grade_group, detected_clean_name = parse_company_and_grade(first_line)
@@ -611,7 +611,7 @@ else:
         def format_phone_with_name(phone):
             label = st.session_state.contact_labels.get(phone, "")
             formatted_p = f"{phone[:3]}-{phone[3:7]}-{phone[7:]}" if len(phone) == 11 else phone
-            if label: return f"👤 {label}  📞 {formatted_p}"
+            if label: return f"👤 {label}   📞 {formatted_p}"
             return f"📞 {formatted_p}"
         
         @st.dialog("📱 문자 전송 대상 및 내용 확인")
@@ -630,7 +630,7 @@ else:
                 p = phones_list[0]
                 label = st.session_state.contact_labels.get(p, "")
                 formatted_p = f"{p[:3]}-{p[3:7]}-{p[7:]}" if len(p) == 11 else p
-                if label: st.write(f"**수신:** 👤 {label}  📞 {formatted_p}")
+                if label: st.write(f"**수신:** 👤 {label}   📞 {formatted_p}")
                 else: st.write(f"**수신 번호:** 📞 {formatted_p}")
                 selected_number = p
             else:
@@ -673,7 +673,8 @@ else:
                             
         with tab_s:
             s_keys = [k for k in group_keys if grouped[k]["grade_group"] == "s_group"]
-            if not s_keys: st.caption("감지된 S, NN, N급 업체가 없습니다.")
+            if not s_keys: 
+                st.caption("감지된 S, NN, N급 업체가 없습니다.")
             else:
                 btn_cols_s = st.columns(4)
                 for g_idx, gkey in enumerate(s_keys):
@@ -687,33 +688,3 @@ else:
                                 show_send_popup(display_name, phones, msg, original_names)
                         else:
                             st.button(f"❌ {display_name} (번호없음)", disabled=True, use_container_width=True, key=f"s_dis_{g_idx}")
-        
-        st.markdown("---")
-        st.subheader("🔍 상세 정보 편집")
-        
-        for s_info in sms_data_list:
-            i = s_info["index"]
-            with st.container():
-                col1, col2, col3, col4 = st.columns([2, 1.5, 1, 1])
-                with col1:
-                    st.text_input(f"업체명 ({i})", value=st.session_state[f"final_nm_{i}"], key=f"nm_{i}_first")
-                with col2:
-                    st.text_input(f"연락처 ({i})", value=st.session_state[f"final_ph_{i}"], key=f"ph_{i}_first")
-                    phones_in_block = re.split(r'[\s,]+', st.session_state.get(f"ph_{i}_first", ""))
-                    labels_info = []
-                    for p in phones_in_block:
-                        p_clean = re.sub(r'[^0-9]', '', p.strip())
-                        if p_clean:
-                            lbl = st.session_state.contact_labels.get(p_clean, "")
-                            if lbl:
-                                fp = f"{p_clean[:3]}-{p_clean[3:7]}-{p_clean[7:]}" if len(p_clean) == 11 else p_clean
-                                labels_info.append(f"{lbl}({fp})")
-                    if labels_info: st.caption("👤 " + " · ".join(labels_info))
-                with col3:
-                    d_idx = machine_options.index(st.session_state[f"final_mc_{i}"]) if st.session_state[f"final_mc_{i}"] in machine_options else machine_options.index("기본 기종")
-                    st.selectbox(f"기종 ({i})", options=machine_options, index=d_idx, key=f"mc_{i}_first")
-                with col4:
-                    g_map = {"v_group": "💎 V, SS급", "s_group": "🟢 S, NN, N급"}
-                    g_opts = ["v_group", "s_group"]
-                    g_idx = g_opts.index(st.session_state[f"final_gd_{i}"])
-                    st.selectbox(f"등급 ({i})", options=g_opts, index=g_idx, format_func=lambda x: g_map[x], key=f"gd_{i}_first")
