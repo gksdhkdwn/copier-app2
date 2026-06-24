@@ -155,6 +155,7 @@ def save_settings(all_settings):
         st.error(f"설정 저장 실패: {e}")
         return False
 
+# [수정] 첫 줄 통째로 가져올 때 v,ss,s,nn,n 등의 등급 표시가 훼손되지 않도록 보존
 def parse_company_and_grade(first_line):
     if not first_line:
         return "s_group", "거래처 확인 바람"
@@ -192,9 +193,12 @@ def parse_company_and_grade(first_line):
         
     name = re.sub(r'[\s·,]+$', '', name).strip()
     
-    return grade_group, name
+    # 등급 접두사가 있었다면 이름 앞단에 "N 한왕주 (개인)" 형태로 결합하여 반환
+    final_display_name = f"{raw_grade} {name}".strip() if raw_grade else name
+    return grade_group, final_display_name
 
 
+# [수정] 직급(직책)이 명시되어 있지 않더라도, 전화번호 앞뒤에 오는 한글 이름을 완벽하게 강제 추출하도록 로직 보완
 def extract_contacts(block):
     results = []
     phone_matches = list(re.finditer(PHONE_RE, block))
@@ -229,6 +233,7 @@ def extract_contacts(block):
             if ma and ma.group(2) not in NON_NAME_WORDS:
                 label = f"{ma.group(2)} {ma.group(1)}"
                 
+        # [핵심 보완] 위의 직급 검색에 실패하더라도, 순수 한글 이름(2~4글자)이 매칭되면 무조건 레이블로 지정
         if not label:
             name = _find_name_after(after)
             if name: label = name
@@ -367,7 +372,6 @@ if st.session_state.current_page == "settings":
             st.success("✅ 프로필이 정상 삭제되었습니다.")
             st.rerun()
 
-    # [핵심 수정] 입력 박스가 수정할 때마다 로컬 변수가 아니라 session_state를 직접 참조/수정하도록 바인딩
     if f"edit_temp_{current_region}" not in st.session_state:
         st.session_state[f"edit_temp_{current_region}"] = copy.deepcopy(active_templates)
     if f"edit_mach_{current_region}" not in st.session_state:
@@ -435,13 +439,12 @@ if st.session_state.current_page == "settings":
             st.session_state.all_settings[current_region]["machines"] = copy.deepcopy(edited_machines)
             st.session_state.all_settings[current_region]["templates"] = copy.deepcopy(edited_templates)
             if save_settings(st.session_state.all_settings):
-                st.success(f"✅ [{current_region}] 지역의 전용 문구 세트 독립 저장 완료!")
+                st.success(f"✅ [{current_region}] 지역의 전용 문구 세트独立 저장 완료!")
                 st.rerun()
     with col_s2:
         if st.button("🔄 현재 지역 기본값 초기화", use_container_width=True):
             st.session_state.all_settings[current_region]["machines"] = copy.deepcopy(DEFAULT_FORMATS)
             st.session_state.all_settings[current_region]["templates"] = copy.deepcopy(DEFAULT_TEMPLATES)
-            # 초기화할 때 세션 상의 임시 저장소도 함께 리셋해 줍니다.
             st.session_state[f"edit_temp_{current_region}"] = copy.deepcopy(DEFAULT_TEMPLATES)
             st.session_state[f"edit_mach_{current_region}"] = copy.deepcopy(DEFAULT_FORMATS)
             save_settings(st.session_state.all_settings)
@@ -617,7 +620,7 @@ else:
         @st.dialog("📱 문자 전송 대상 및 내용 확인")
         def show_send_popup(name, phones_list, msg, original_names=None):
             st.warning("⚠️ 수신 번호를 확인 후 하단의 최종 전송 버튼을 눌러주세요.")
-            st.write(f"**대표 업체명:** {name}")
+            st.write(f"**대표 업체명:** {name}") # [적용] v,ss,s,nn,n이 포함된 업체명 표출
             
             if original_names and len(original_names) > 1:
                 with st.expander(f"📍 통합된 상세 위치/지점 이름 ({len(original_names)}개)", expanded=True):
