@@ -115,7 +115,6 @@ def load_settings():
             if isinstance(loaded, dict) and loaded:
                 if "machines" in loaded or "templates" in loaded:
                     migrated = {}
-                    # E지역 추가
                     for reg in ["A지역", "B지역", "C지역", "D지역", "E지역"]:
                         migrated[reg] = {
                             "machines": loaded.get("machines", copy.deepcopy(DEFAULT_FORMATS)),
@@ -141,7 +140,6 @@ def load_settings():
     except Exception:
         pass
     
-    # 기본 반환 구조에 E지역 추가
     return {
         "A지역": {"machines": copy.deepcopy(DEFAULT_FORMATS), "templates": copy.deepcopy(DEFAULT_TEMPLATES)},
         "B지역": {"machines": copy.deepcopy(DEFAULT_FORMATS), "templates": copy.deepcopy(DEFAULT_TEMPLATES)},
@@ -425,7 +423,6 @@ if st.session_state.current_page == "settings":
         with st.expander(group_name, expanded=False):
             for m in machines:
                 if m in edited_machines:
-                    # 💡 오류 수정: key에서 동적 변수를 분리하여 고정 구조화
                     edited_machines[m] = st.text_area(
                         f"**{m}**", value=edited_machines[m], height=100, key=f"edit_m_{m}"
                     )
@@ -655,7 +652,7 @@ else:
         
         tab_s, tab_v = st.tabs(["🟢 S, NN, N급 그룹 목록", "💎 V, SS급 그룹 목록"])
         
-        # 🟢 S, NN, N급 탭 구현 및 누락 복구
+        # 🟢 1. S, NN, N급 탭 복구 완료
         with tab_s:
             s_keys = [k for k in group_keys if grouped[k]["grade_group"] == "s_group"]
             if not s_keys: 
@@ -666,7 +663,31 @@ else:
                     info = grouped[gkey]
                     phones, machines, display_name, original_names = info["phones"], info["machines"], info["display_name"], info["original_names"]
                     
+                    # 수신용 메시지 빌드
                     generated_msg = build_message_by_grade(machines, active_machines, active_templates, "s_group")
                     
+                    # 4열 배치 시스템 구현
                     with btn_cols_s[g_idx % 4]:
-                        pass # 나머지 탭 기능 연결 부 (생략됨)
+                        button_label = f"🟢 {display_name} ({len(machines)}대)"
+                        if st.button(button_label, key=f"btn_s_{gkey}", use_container_width=True):
+                            show_send_popup(display_name, phones, generated_msg, original_names)
+
+        # 💎 2. V, SS급 탭 복구 완료
+        with tab_v:
+            v_keys = [k for k in group_keys if grouped[k]["grade_group"] == "v_group"]
+            if not v_keys:
+                st.caption("감지된 V, SS급 업체가 없습니다.")
+            else:
+                btn_cols_v = st.columns(4)
+                for g_idx, gkey in enumerate(v_keys):
+                    info = grouped[gkey]
+                    phones, machines, display_name, original_names = info["phones"], info["machines"], info["display_name"], info["original_names"]
+                    
+                    # 수신용 메시지 빌드
+                    generated_msg = build_message_by_grade(machines, active_machines, active_templates, "v_group")
+                    
+                    # 4열 배치 시스템 구현
+                    with btn_cols_v[g_idx % 4]:
+                        button_label = f"💎 {display_name} ({len(machines)}대)"
+                        if st.button(button_label, key=f"btn_v_{gkey}", use_container_width=True):
+                            show_send_popup(display_name, phones, generated_msg, original_names)
