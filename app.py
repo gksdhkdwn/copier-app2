@@ -34,8 +34,7 @@ DEFAULT_FORMATS = {
     "N500": txt_sindo, "N501": txt_sindo, "N502": txt_sindo, "N600": txt_sindo, "N601": txt_sindo,
     "D320": txt_sindo, "D400": txt_sindo, "D410": txt_sindo, "D420": txt_sindo, "D450": txt_sindo,
     "D460": txt_sindo, "D470": txt_sindo, 
-    "MA2100": txt_ecosys, "M5526": txt_ecosys, "M5521": txt_ecosys, "ECOSYS": txt_ecosys, 
-    "MA2101": txt_kyocera_m2101,
+    "MA2101": txt_kyocera_m2101, "MA2100": txt_ecosys, "M5526": txt_ecosys, "M5521": txt_ecosys, "ECOSYS": txt_ecosys, 
     "305": txt_305, "5473": txt_5473, 
     "C2263": txt_apeos, "C2265": txt_apeos, "C2061": txt_apeos, "C3067": txt_apeos, "C2260": txt_apeos, 
     "C2270": txt_apeos, "C2275": txt_apeos, "C3375": txt_apeos, "C4475": txt_apeos, "C5575": txt_apeos, 
@@ -409,7 +408,7 @@ if st.session_state.current_page == "settings":
         
     machine_groups = {
         "📠 신도리코 (N/D 시리즈)": ["N500", "N501", "N502", "N600", "N601", "D320", "D400", "D410", "D420", "D450", "D460", "D470"],
-        "📠 교세라 (ECOSYS / MA2101)": ["MA2100", "M5526", "M5521", "ECOSYS", "M2101"],
+        "📠 교세라 (ECOSYS / MA2101)": ["MA2101", "MA2100", "M5526", "M5521", "ECOSYS"],
         "📠 후지 Apeos (C 시리즈)": ["C2263", "C2265", "C2061", "C3067", "C2260", "C2270", "C2275", "C3375", "C4475", "C5575", "C2271", "C2273", "C3371", "C3373", "C3070", "C3570", "C4570", "C5570", "C7070", "Apeos"],
         "📠 리코": ["2554", "C3003", "C4504"],
         "📠 삼성 복합기": ["Mx6", "X3220NR", "K3250", "X-9201", "X4-시리즈", "K4-시리즈", "X7-시리즈", "K7-시리즈", "SL-"],
@@ -523,15 +522,15 @@ else:
             matched_machine = "기본 기종"
             block_lower = block.lower()
             
-            if "mx6" in block_lower or "mx-6" in block_lower: matched_machine = "Mx6"
+            if "2101" in block_lower or "ma2101" in block_lower or "ma-2101" in block_lower: matched_machine = "MA2101"
+            elif "2100" in block_lower or "ma2100" in block_lower or "ma-2100" in block_lower: matched_machine = "MA2100"
+            elif "mx6" in block_lower or "mx-6" in block_lower: matched_machine = "Mx6"
             elif "3250" in block_lower: matched_machine = "K3250"
             elif "3220" in block_lower: matched_machine = "X3220NR"
             elif "9201" in block_lower: matched_machine = "X-9201"
             elif re.search(r'[xk]-?4\d{3}', block_lower) or "x4" in block_lower or "k4" in block_lower: matched_machine = "X4-시리즈"
             elif re.search(r'[xk]-?7\d{3}', block_lower) or "x7" in block_lower or "k7" in block_lower: matched_machine = "X7-시리즈"
             elif "sl-" in block_lower: matched_machine = "SL-"
-            elif "m2101" in block_lower: matched_machine = "M2101"
-            elif "ma2100" in block_lower: matched_machine = "MA2100"
             elif "hp" in block_lower: matched_machine = "HP"
             elif "410" in block_lower: matched_machine = "410"
             elif "lexmark" in block_lower or "렉스마크" in block_lower: matched_machine = "Lexmark"
@@ -667,14 +666,13 @@ else:
                     
                     col_target = btn_cols_s[g_idx % 4]
                     with col_target:
-                        btn_label = f"📱 {display_name} ({len(machines)}대)"
-                        if col_target.button(btn_label, key=f"s_btn_{gkey}_{g_idx}", use_container_width=True):
+                        if st.button(f"✉️ {display_name}", key=f"btn_s_{gkey}"):
                             show_send_popup(display_name, phones, generated_msg, original_names)
 
         # 💎 2. V, SS급 탭
         with tab_v:
             v_keys = [k for k in group_keys if grouped[k]["grade_group"] == "v_group"]
-            if not v_keys: 
+            if not v_keys:
                 st.caption("감지된 V, SS급 업체가 없습니다.")
             else:
                 btn_cols_v = st.columns(4)
@@ -686,6 +684,5 @@ else:
                     
                     col_target = btn_cols_v[g_idx % 4]
                     with col_target:
-                        btn_label = f"💎 {display_name} ({len(machines)}대)"
-                        if col_target.button(btn_label, key=f"v_btn_{gkey}_{g_idx}", use_container_width=True):
+                        if st.button(f"💎 {display_name}", key=f"btn_v_{gkey}"):
                             show_send_popup(display_name, phones, generated_msg, original_names)
