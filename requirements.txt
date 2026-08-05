@@ -1,3 +1,4 @@
 Plaintext
 streamlit>=1.31.0
 starlette<0.36.0
+pandas
