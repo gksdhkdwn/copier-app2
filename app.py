@@ -1,412 +1,741 @@
-import sys
+import streamlit as st
+import re
+import urllib.parse
+import json
 import os
-import io
-import win32print
-import pandas as pd
-from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QPushButton, QFileDialog, QTableWidget, QTableWidgetItem, 
-                             QHeaderView, QMessageBox, QComboBox, QCheckBox, QLabel, 
-                             QAbstractItemView, QMenu)
-from PyQt5.QtCore import Qt
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.pdfgen import canvas
-from reportlab.lib import colors
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.platypus import Paragraph
-from pdf2image import convert_from_bytes
-import fitz  # PyMuPDF
+import copy  
+from collections import OrderedDict
 
-# PyInstaller 환경 설정
-def get_resource_path(relative_path):
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
+# 1. 페이지 기본 설정
+st.set_page_config(page_title="퍼스트전산 마감 도우미", page_icon="📱", layout="wide")
 
-poppler_path = get_resource_path("poppler/bin")
+SETTINGS_FILE = "message_settings.json"
 
-# --- 라벨 출력 서식 (PDF 생성용 함수) ---
-def txt_samsung(c, row, font_name, title_color):
-    c.setLineWidth(1.5)
-    c.rect(10, 10, 263, 188)
-    
-    c.setFont(font_name, 15)
-    c.drawCentredString(141, 175, "[ 복합기 소모품 교체 ]")
-    
-    c.setLineWidth(1)
-    c.line(20, 168, 263, 168)
-    
-    y = 145
-    labels = ["제품 모델명 :", "카트리지 모델 :", "장 착 위 치 :", "배 송 지 :", "고 객 명 :", "연 락 처 :"]
-    keys = ['기종', '카트리지', '설치위치', '배송지', '고객명', '연락처']
-    
-    for label, key in zip(labels, keys):
-        c.setFont(font_name, 12)
-        c.drawString(20, y, label)
-        
-        val = str(row.get(key, ''))
-        if key == '설치위치':
-            style = ParagraphStyle('BoldStyle', fontName=font_name, fontSize=14, leading=16, textColor=colors.red)
-            p = Paragraph(f"<b>{val}</b>", style)
-            p.wrapOn(c, 160, 30)
-            p.drawOn(c, 105, y - 2)
-        elif key in ['고객명', '연락처']:
-            style = ParagraphStyle('DarkStyle', fontName=font_name, fontSize=12, leading=14, textColor=colors.HexColor('#000080'))
-            p = Paragraph(f"<b>{val}</b>", style)
-            p.wrapOn(c, 160, 30)
-            p.drawOn(c, 105, y)
-        else:
-            style = ParagraphStyle('NormalStyle', fontName=font_name, fontSize=11, leading=13)
-            p = Paragraph(val, style)
-            p.wrapOn(c, 160, 30)
-            p.drawOn(c, 105, y)
-            
-        y -= 21
+# 2. 안내 문구 기본값
+txt_sindo = "기기 메뉴버튼 → 화면 윗쪽 카운터 버튼 → 목록인쇄 → 시작 누르시면 출력물 하나 나옵니다. 인쇄물 캡쳐본 문자로 부탁드립니다."
+txt_ecosys = "기기 화면 좌측 하단 시스템메뉴/카운터 버튼 누르신 후 → 리포트 → 리포트 인쇄 → 스테이터스페이지 인쇄 하시면 출력물이 나옵니다. 캡쳐 후 문자로 부탁드립니다."
+txt_305 = "1. 기계확인/사양설정 → 2. 리포트 → 프린터사용량 ok 누르신 후 리포트 캡쳐본 문자로 부탁드립니다."
+txt_5473 = "사용량확인차 문자남겼습니다 확인방법 - 장치설정 > 보고서 > 시스템 > 인쇄집계결과 > 예 > 확인 누르면 출력물 하나 나옵니다 출력물 사진찍어서 문자발송 부탁드립니다."
+txt_apeos = "기계확인 버튼 → 사용매수 확인 눌러서 일련번호와 현재사용매수 나온 화면 캡쳐 후 문자로 부탁드립니다."
+txt_5700 = "(오른쪽 위) 연장 표시 → 모든 설정 → (밑으로 내리고) 보고서 인쇄 → (밑으로) 프린터 설정 (4장 중에 3 페이지만 문자 보냅니다.)"
+txt_l5100 = "+ 누르면 Machine info 누르고 ok → Print settings ok 누른 후 go(시작버튼) 누르셔서 나오는 4장 중 3번째 장만 문자로 부탁드립니다."
+txt_ricoh = "사용자도구 클릭 → 카운터 클릭 → 카운터 목록인쇄클릭 (인쇄물 출력 후 발송 부탁드립니다.)"
+txt_5005 = "사양설정 > 리포트 > 기능설정리스트 확인 후 문자로 부탁드립니다."
 
-def txt_sinoh(c, row, font_name, title_color):
-    c.setLineWidth(1.5)
-    c.rect(10, 10, 263, 188)
-    
-    c.setFont(font_name, 15)
-    c.drawCentredString(141, 175, "[ 복합기 토너 교체 ]")
-    
-    c.setLineWidth(1)
-    c.line(20, 168, 263, 168)
-    
-    y = 145
-    labels = ["제품 모델명 :", "토 너 색 상 :", "장 착 위 치 :", "배 송 지 :", "고 객 명 :", "연 락 처 :"]
-    keys = ['기종', '카트리지', '설치위치', '배송지', '고객명', '연락처']
-    
-    for label, key in zip(labels, keys):
-        c.setFont(font_name, 12)
-        c.drawString(20, y, label)
-        
-        val = str(row.get(key, ''))
-        if key == '설치위치':
-            style = ParagraphStyle('BoldStyle', fontName=font_name, fontSize=14, leading=16, textColor=colors.red)
-            p = Paragraph(f"<b>{val}</b>", style)
-            p.wrapOn(c, 160, 30)
-            p.drawOn(c, 105, y - 2)
-        elif key in ['고객명', '연락처']:
-            style = ParagraphStyle('DarkStyle', fontName=font_name, fontSize=12, leading=14, textColor=colors.HexColor('#000080'))
-            p = Paragraph(f"<b>{val}</b>", style)
-            p.wrapOn(c, 160, 30)
-            p.drawOn(c, 105, y)
-        else:
-            style = ParagraphStyle('NormalStyle', fontName=font_name, fontSize=11, leading=13)
-            p = Paragraph(val, style)
-            p.wrapOn(c, 160, 30)
-            p.drawOn(c, 105, y)
-            
-        y -= 21
+txt_sam_mx6 = "홈 화면에서 우측으로 넘기시고, 보고서-구성/상태 페이지-사용페이지-프린트모양 인쇄버튼 누르고 사진찍어 보내주시면 됩니다."
+txt_sam_keypad = "복사기 숫자 키패드 위 카운터 클릭 후 화면에서 인쇄 눌러주시고 나온 출력물 사진찍어 보내주시면 됩니다."
+txt_sam_xk47 = "설정 → 왼쪽 쭉 내리다보면 리포트 누름 → 오른쪽 사용량 정보 클릭하여 확인 후 문자로 부탁드립니다."
+txt_kyocera_m2101 = "화면 맨 밑 가운데에 점3개(***)를 눌러주세요. 화살표 아래로한번-카운터 확인-기본설정-인쇄페이지 수-화살표 아래로한번 내리신 후 사진찍어 보내주시면 됩니다. (시리얼넘버도 필요하면 그 위에 상태페이지 인쇄 누르기)"
+txt_hp_common = "메인화면 상단 스크롤 내려주시고 톱니바퀴 아이콘 눌러주세요. 목록 하단에 보고서 눌러주시고 상태보고서 찾아서 인쇄하신 후 사진찍어 보내주시면 됩니다."
+txt_lexmark_410 = "집모양-스패너모양-보고서-장치통계-장치통계 페이지2번 사진찍어서 보내주시면 됩니다."
+txt_default = "기기 화면의 카운터 메뉴에서 사용량 확인 후 사진 한 장만 문자나 카톡으로 발송 부탁드립니다."
 
-def txt_ecosys(c, row, font_name, title_color):
-    txt_sinoh(c, row, font_name, title_color)
-
-def txt_kyocera_m2101(c, row, font_name, title_color):
-    c.setLineWidth(1.5)
-    c.rect(10, 10, 263, 188)
-    
-    c.setFont(font_name, 15)
-    c.setFillColor(title_color)
-    c.drawCentredString(141, 175, "[ 토너 교체 안내 ]")
-    
-    c.setLineWidth(1)
-    c.setStrokeColor(colors.black)
-    c.line(20, 168, 263, 168)
-    
-    y = 145
-    labels = ["제품 모델명 :", "토 너 색 상 :", "장 착 위 치 :", "배 송 지 :", "고 객 명 :", "연 락 처 :"]
-    keys = ['기종', '카트리지', '설치위치', '배송지', '고객명', '연락처']
-    
-    for label, key in zip(labels, keys):
-        c.setFillColor(colors.black)
-        c.setFont(font_name, 12)
-        c.drawString(20, y, label)
-        
-        val = str(row.get(key, ''))
-        if key == '설치위치':
-            style = ParagraphStyle('BoldStyle', fontName=font_name, fontSize=14, leading=16, textColor=colors.red)
-            p = Paragraph(f"<b>{val}</b>", style)
-            p.wrapOn(c, 160, 30)
-            p.drawOn(c, 105, y - 2)
-        elif key in ['고객명', '연락처']:
-            style = ParagraphStyle('DarkStyle', fontName=font_name, fontSize=12, leading=14, textColor=colors.HexColor('#000080'))
-            p = Paragraph(f"<b>{val}</b>", style)
-            p.wrapOn(c, 160, 30)
-            p.drawOn(c, 105, y)
-        else:
-            style = ParagraphStyle('NormalStyle', fontName=font_name, fontSize=11, leading=13)
-            p = Paragraph(val, style)
-            p.wrapOn(c, 160, 30)
-            p.drawOn(c, 105, y)
-            
-        y -= 21
-
-def txt_305(c, row, font_name, title_color):
-    txt_kyocera_m2101(c, row, font_name, title_color)
-
-def txt_5473(c, row, font_name, title_color):
-    c.setLineWidth(1.5)
-    c.rect(10, 10, 263, 188)
-    
-    c.setFont(font_name, 15)
-    c.setFillColor(title_color)
-    c.drawCentredString(141, 175, "[ 토너 교체 안내 ]")
-    
-    c.setLineWidth(1)
-    c.setStrokeColor(colors.black)
-    c.line(20, 168, 263, 168)
-    
-    y = 145
-    labels = ["제품 모델명 :", "토 너 색 상 :", "장 착 위 치 :", "배 송 지 :", "고 객 명 :", "연 락 처 :"]
-    keys = ['기종', '카트리지', '설치위치', '배송지', '고객명', '연락처']
-    
-    for label, key in zip(labels, keys):
-        c.setFillColor(colors.black)
-        c.setFont(font_name, 12)
-        c.drawString(20, y, label)
-        
-        val = str(row.get(key, ''))
-        if key == '설치위치':
-            style = ParagraphStyle('BoldStyle', fontName=font_name, fontSize=14, leading=16, textColor=colors.red)
-            p = Paragraph(f"<b>{val}</b>", style)
-            p.wrapOn(c, 160, 30)
-            p.drawOn(c, 105, y - 2)
-        elif key in ['고객명', '연락처']:
-            style = ParagraphStyle('DarkStyle', fontName=font_name, fontSize=12, leading=14, textColor=colors.HexColor('#000080'))
-            p = Paragraph(f"<b>{val}</b>", style)
-            p.wrapOn(c, 160, 30)
-            p.drawOn(c, 105, y)
-        else:
-            style = ParagraphStyle('NormalStyle', fontName=font_name, fontSize=11, leading=13)
-            p = Paragraph(val, style)
-            p.wrapOn(c, 160, 30)
-            p.drawOn(c, 105, y)
-            
-        y -= 21
-
-# 기종 매핑 및 폼 자동선택 매핑
 DEFAULT_FORMATS = {
-    "SL-": txt_samsung, "CLX": txt_samsung, "MultiXpress": txt_samsung, "SAMSUNG": txt_samsung,
-    "N60": txt_sinoh, "D400": txt_sinoh, "D410": txt_sinoh, "D420": txt_sinoh, "D450": txt_sinoh, 
-    "C224": txt_sinoh, "C284": txt_sinoh, "C364": txt_sinoh, "C225": txt_sinoh, "SINOH": txt_sinoh,
+    "N500": txt_sindo, "N501": txt_sindo, "N502": txt_sindo, "N600": txt_sindo, "N601": txt_sindo,
+    "D320": txt_sindo, "D400": txt_sindo, "D410": txt_sindo, "D420": txt_sindo, "D450": txt_sindo,
+    "D460": txt_sindo, "D470": txt_sindo, 
     "MA2100": txt_ecosys, "M5526": txt_ecosys, "M5521": txt_ecosys, "ECOSYS": txt_ecosys, 
-    "MA2101": txt_kyocera_m2101, 
+    "MA2101": txt_kyocera_m2101,
     "305": txt_305, "5473": txt_5473, 
+    "C2263": txt_apeos, "C2265": txt_apeos, "C2061": txt_apeos, "C3067": txt_apeos, "C2260": txt_apeos, 
+    "C2270": txt_apeos, "C2275": txt_apeos, "C3375": txt_apeos, "C4475": txt_apeos, "C5575": txt_apeos, 
+    "C2271": txt_apeos, "C2273": txt_apeos, "C3371": txt_apeos, "C3373": txt_apeos, "C3070": txt_apeos, 
+    "C3570": txt_apeos, "C4570": txt_apeos, "C5570": txt_apeos, "C7070": txt_apeos, "Apeos": txt_apeos, 
+    "5700": txt_5700, "L5100": txt_l5100,
+    "2554": txt_ricoh, "C3003": txt_ricoh, "C4504": txt_ricoh, "5005": txt_5005, 
+    "Mx6": txt_sam_mx6, "X3220NR": txt_sam_keypad, "K3250": txt_sam_keypad, "X-9201": txt_sam_keypad,
+    "X4-시리즈": txt_sam_xk47, "K4-시리즈": txt_sam_xk47, "X7-시리즈": txt_sam_xk47, "K7-시리즈": txt_sam_xk47, "SL-": txt_sam_xk47,
+    "HP": txt_hp_common, "410": txt_lexmark_410, "Lexmark": txt_lexmark_410,
+    "기본 기종": txt_default
 }
 
-class LabelPrinterApp(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.df = None
-        self.initUI()
+DEFAULT_TEMPLATES = {
+    "v_single_greeting": "안녕하세요 퍼스트 전산입니다.\n세금계산서 발행을 위해 사용량 확인을 위한 카운터 사진이 필요하여 연락드렸습니다.\n카운터 한장만 보내주시면 감사하겠습니다.",
+    "v_single_closing": "매번 번거롭게 해드려 죄송합니다.",
+    "v_multi_greeting": "안녕하세요 퍼스트 전산입니다.\n세금계산서 발행을 위해 보유하신 총 {total}대 기기의 사용량 확인을 위한 카운터 사진이 필요하여 연락드렸습니다.\n각 기기별 카운터 한장씩 보내주시면 감사하겠습니다.",
+    "v_multi_closing": "매번 번거롭게 해드려 죄송합니다.",
+    
+    "s_single_greeting": "안녕하세요 퍼스트 전산입니다.\n세금계산서 발행을 위해 사용량 확인을 위한 카운터 사진이 필요하여 연락드렸습니다.\n카운터 한장만 보내주시면 감사하겠습니다.",
+    "s_single_closing": "매번 번거롭게 해드려 죄송합니다.",
+    "s_multi_greeting": "안녕하세요 퍼스트 전산입니다.\n세금계산서 발행을 위해 보유하신 총 {total}대 기기의 사용량 확인을 위한 카운터 사진이 필요하여 연락드렸습니다.\n각 기기별 카운터 한장씩 보내주시면 감사하겠습니다.",
+    "s_multi_closing": "매번 번거롭게 해드려 죄송합니다."
+}
 
-    def initUI(self):
-        self.setWindowTitle("택배 라벨 자동 출력 프로그램 (100x75mm)")
-        self.resize(1000, 600)
-        
-        main_layout = QVBoxLayout()
-        
-        # 상단 컨트롤 레이아웃
-        top_layout = QHBoxLayout()
-        
-        self.btn_excel = QPushButton("엑셀 파일 불러오기")
-        self.btn_excel.clicked.connect(self.load_excel)
-        top_layout.addWidget(self.btn_excel)
-        
-        top_layout.addWidget(QLabel("프린터 선택:"))
-        self.cb_printer = QComboBox()
-        self.load_printers()
-        top_layout.addWidget(self.cb_printer)
-        
-        self.chk_auto = QCheckBox("자동 서식 매핑 사용")
-        self.chk_auto.setChecked(True)
-        top_layout.addWidget(self.chk_auto)
-        
-        self.btn_print_all = QPushButton("선택 항목 인쇄")
-        self.btn_print_all.clicked.connect(self.print_selected)
-        top_layout.addWidget(self.btn_print_all)
-        
-        main_layout.addLayout(top_layout)
-        
-        # 테이블 위젯
-        self.table = QTableWidget()
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.table.customContextMenuRequested.connect(self.open_context_menu)
-        main_layout.addWidget(self.table)
-        
-        self.setLayout(main_layout)
+TITLE_LIST = [
+    '회장', '부회장', '사장', '부사장', '대표이사', '대표', '전무이사', '전무',
+    '상무이사', '상무', '본부장', '부서장', '실장', '팀장', '부장', '차장', '과장',
+    '대리', '주임', '사원', '이사', '원장', '점장', '점주', '매니저', '소장', '계장',
+    '담당자', '담당', '기사', '선생', '박사', '사모', '여사', '회계', '경리'
+]
+TITLE_RE = '(?:' + '|'.join(TITLE_LIST) + ')(?:님)?'
+NAME_RE = r'[가-힣]{2,4}'
+PHONE_RE = r'01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}'
 
-    def load_printers(self):
-        printers = [printer[2] for printer in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
-        default_printer = win32print.GetDefaultPrinter()
-        self.cb_printer.addItems(printers)
-        if default_printer in printers:
-            self.cb_printer.setCurrentText(default_printer)
+NON_NAME_WORDS = {
+    '분기마감', '매월마감', '매월방문', '매주방문', '매주마감', '격주방문',
+    '격주마감', '월말마감', '월말방문', '분기', '마감', '방문', '매월',
+    '매주', '격주', '월말', '계약', '결제', '영업', '관리', '인쇄', '출력', '점검', '신규',
+    '갱신', '해지', '카운터', '문자', '자료', '발송', '확인', '안내', '미수', '부착', '미부착', 
+    '유지보수', '유지', '보수', '서비스', '오른쪽', '왼쪽', '비서실', '회의실', '사무실', '관리실', 
+    '영업실', '본사', '지사', '지점', '매장', '연락처', '전화', '핸드폰', '전화번호', '대표번호', 
+    '연락', '문의', '담당자', '복합기', '키맨', '경영', '재무', '인사', '총무', '구매', '생산', 
+    '품질', '기술', '연구', '개발', '기획', '전산', '시설', '경비',
+}
 
-    def load_excel(self):
-        fname, _ = QFileDialog.getOpenFileName(self, "엑셀 파일 선택", "", "Excel Files (*.xlsx *.xls)")
-        if fname:
-            try:
-                self.df = pd.read_excel(fname)
-                self.populate_table()
-            except Exception as e:
-                QMessageBox.critical(self, "오류", f"엑셀 파일을 읽는 중 오류가 발생했습니다:\n{str(e)}")
+def _find_name_after(after):
+    stripped = re.sub(r'^[\s:\-/,·()]+', '', after)
+    for length in (3, 2, 4):
+        if len(stripped) >= length:
+            cand = stripped[:length]
+            if re.fullmatch(rf'[가-힣]{{{length}}}', cand):
+                if length < len(stripped) and re.match(r'[가-힣]', stripped[length]):
+                    continue
+                if cand not in NON_NAME_WORDS:
+                    return cand
+    return None
 
-    def populate_table(self):
-        if self.df is None:
-            return
+def _find_name_before(before):
+    stripped = re.sub(r'[\s:\-/,·()]+$', '', before)
+    for length in (3, 2, 4):
+        if len(stripped) >= length:
+            cand = stripped[-length:]
+            if re.fullmatch(rf'[가-힣]{{{length}}}', cand):
+                if length < len(stripped) and re.match(r'[가-힣]', stripped[-length-1]):
+                    continue
+                if cand not in NON_NAME_WORDS:
+                    return cand
+    return None
+
+def load_settings():
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
             
-        self.table.setRowCount(0)
-        cols = list(self.df.columns)
+            if isinstance(loaded, dict) and loaded:
+                if "machines" in loaded or "templates" in loaded:
+                    migrated = {}
+                    for reg in ["A지역", "B지역", "C지역", "D지역", "E지역"]:
+                        migrated[reg] = {
+                            "machines": loaded.get("machines", copy.deepcopy(DEFAULT_FORMATS)),
+                            "templates": loaded.get("templates", copy.deepcopy(DEFAULT_TEMPLATES))
+                        }
+                    return migrated
+
+                for rk in loaded:
+                    if "machines" not in loaded[rk]:
+                        loaded[rk]["machines"] = copy.deepcopy(DEFAULT_FORMATS)
+                    else:
+                        for mk in DEFAULT_FORMATS:
+                            if mk not in loaded[rk]["machines"]:
+                                loaded[rk]["machines"][mk] = DEFAULT_FORMATS[mk]
+                                
+                    if "templates" not in loaded[rk]:
+                        loaded[rk]["templates"] = copy.deepcopy(DEFAULT_TEMPLATES)
+                    else:
+                        for tk in DEFAULT_TEMPLATES:
+                            if tk not in loaded[rk]["templates"]:
+                                loaded[rk]["templates"][tk] = DEFAULT_TEMPLATES[tk]
+                return loaded
+    except Exception:
+        pass
+    
+    return {
+        "A지역": {"machines": copy.deepcopy(DEFAULT_FORMATS), "templates": copy.deepcopy(DEFAULT_TEMPLATES)},
+        "B지역": {"machines": copy.deepcopy(DEFAULT_FORMATS), "templates": copy.deepcopy(DEFAULT_TEMPLATES)},
+        "C지역": {"machines": copy.deepcopy(DEFAULT_FORMATS), "templates": copy.deepcopy(DEFAULT_TEMPLATES)},
+        "D지역": {"machines": copy.deepcopy(DEFAULT_FORMATS), "templates": copy.deepcopy(DEFAULT_TEMPLATES)},
+        "E지역": {"machines": copy.deepcopy(DEFAULT_FORMATS), "templates": copy.deepcopy(DEFAULT_TEMPLATES)}
+    }
+
+def save_settings(all_settings):
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(all_settings, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        st.error(f"설정 저장 실패: {e}")
+        return False
+
+def parse_company_and_grade(first_line):
+    if not first_line:
+        return "s_group", "거래처 확인 바람"
+    
+    match = re.match(r'^\d+(?:\s*,\s*)\d*([a-zA-Z]+)?(.*)', first_line)
+    raw_grade = ""
+    raw_name = first_line
+    
+    if match:
+        raw_grade = (match.group(1) or "").upper()
+        raw_name = match.group(2).strip()
+    else:
+        alt_match = re.match(r'^(V|SS|S|NN|N)(.+)$', first_line, re.IGNORECASE)
+        if alt_match:
+            raw_grade = alt_match.group(1).upper()
+            raw_name = alt_match.group(2).strip()
+
+    if raw_grade in ["V", "SS"]:
+        grade_group = "v_group"
+    else:
+        grade_group = "s_group"
         
-        # 선택 컬럼과 서식 선택 컬럼 추가
-        headers = ["선택"] + cols + ["출력 서식"]
-        self.table.setColumnCount(len(headers))
-        self.table.setHorizontalHeaderLabels(headers)
-        
-        format_options = ["삼성", "신도리코", "교세라 ECOSYS", "교세라 MA2101", "교세라 305", "교세라 5473"]
-        
-        for row_idx, row in self.df.iterrows():
-            self.table.insertRow(row_idx)
+    name = re.split(r'[/／]', raw_name, maxsplit=1)[0]
+    schedule_keywords = ['매월마감', '매월방문', '매주방문', '매주마감', '격주방문', '격주마감', '월말마감', '월말방문', '분기마감', 'USAGE TRACKER', 'USAGE']
+    
+    earliest = len(name)
+    for kw in schedule_keywords:
+        idx = name.find(kw)
+        if 0 <= idx < earliest:
+            earliest = idx
             
-            # 체크박스
-            chk = QCheckBox()
-            chk.setChecked(True)
-            self.table.setCellWidget(row_idx, 0, chk)
-            
-            # 데이터 채우기
-            for col_idx, col_name in enumerate(cols):
-                val = str(row[col_name]) if pd.notna(row[col_name]) else ""
-                item = QTableWidgetItem(val)
-                self.table.setItem(row_idx, col_idx + 1, item)
+    if earliest < len(name):
+        name = name[:earliest]
+        
+    name = re.sub(r'[\s·,]+$', '', name).strip()
+    final_display_name = f"{raw_grade} {name}".strip() if raw_grade else name
+    return grade_group, final_display_name
+
+def extract_contacts(block):
+    results = []
+    phone_matches = list(re.finditer(PHONE_RE, block))
+    seen = set()
+    
+    for idx, m in enumerate(phone_matches):
+        phone_raw = m.group(0)
+        clean = re.sub(r'[^0-9]', '', phone_raw)
+        if clean in seen:
+            continue
+        seen.add(clean)
+        
+        # 이름 탐색 범위를 '번호가 놓인 줄' 안으로 제한한다.
+        # (줄을 넘어가면 다음 사람의 이름을 끌어와 라벨이 뒤엉킨다)
+        line_start = block.rfind('\n', 0, m.start()) + 1
+        line_end = block.find('\n', m.end())
+        if line_end == -1:
+            line_end = len(block)
+
+        before_start = max(line_start, m.start() - 60)
+        if idx > 0 and phone_matches[idx - 1].end() > before_start:
+            before_start = phone_matches[idx - 1].end()
+        before = block[before_start:m.start()]
+
+        after_end = min(line_end, m.end() + 40)
+        if idx + 1 < len(phone_matches) and phone_matches[idx + 1].start() < after_end:
+            after_end = phone_matches[idx + 1].start()
+        after = block[m.end():after_end]
+
+        # 한국식 표기는 '이름 직급 번호' 순서가 압도적이므로 before를 먼저 본다.
+        label = ""
+        ma = re.search(rf'(?:^|[\s/,:·\-()])({NAME_RE})\s*({TITLE_RE})\s*[:\-\s/()]*$', before)
+        if ma and ma.group(1) not in NON_NAME_WORDS:
+            label = f"{ma.group(1)} {ma.group(2)}"
+        if not label:
+            ma = re.search(rf'({TITLE_RE})\s+({NAME_RE})\s*[:\-\s/()]*$', before)
+            if ma and ma.group(2) not in NON_NAME_WORDS:
+                label = f"{ma.group(2)} {ma.group(1)}"
+        if not label:
+            ma = re.search(rf'^\s*[:\-\s/,·()]*\s*({NAME_RE})\s*({TITLE_RE})', after)
+            if ma and ma.group(1) not in NON_NAME_WORDS:
+                label = f"{ma.group(1)} {ma.group(2)}"
+        if not label:
+            ma = re.search(rf'^\s*[:\-\s/,·()]*\s*({TITLE_RE})\s+({NAME_RE})', after)
+            if ma and ma.group(2) not in NON_NAME_WORDS:
+                label = f"{ma.group(2)} {ma.group(1)}"
+
+        if not label:
+            name = _find_name_before(before)
+            if name: label = name
+        if not label:
+            name = _find_name_after(after)
+            if name: label = name
+
+        if not label:
+            ma = re.search(rf'(?:^|[\s/,:·\-()])({TITLE_RE})\s*[:\-\s/()]*$', before)
+            if ma: label = ma.group(1)
+        if not label:
+            ma = re.search(rf'^\s*[:\-\s/,·()]*\s*({TITLE_RE})', after)
+            if ma: label = ma.group(1)
+        
+        results.append({"phone": clean, "label": label})
+    return results
+
+LANDLINE_RE = r'0\d{1,2}[-.\s]?\d{3,4}[-.\s]?\d{4}'
+
+def machine_search_text(block):
+    """기종 매칭용 텍스트. 전화번호를 먼저 지운다.
+    (안 지우면 '010-4100-1234'가 렉스마크 410으로, '010-5700-...'이 5700으로 잡힌다)"""
+    t = re.sub(PHONE_RE, ' ', block)
+    t = re.sub(LANDLINE_RE, ' ', t)
+    return t.lower()
+
+def machine_key_hit(key, text):
+    """숫자만으로 된 기종코드(305, 410, 5700...)는 더 긴 숫자열의 일부로
+    걸리지 않도록 앞뒤 숫자 경계를 강제한다."""
+    k = key.lower()
+    if re.fullmatch(r'\d+', k):
+        return re.search(rf'(?<!\d){re.escape(k)}(?!\d)', text) is not None
+    return k in text
+
+def build_message_by_grade(machines_list, machine_formats, templates, grade_group):
+    model_counts = OrderedDict()
+    for m in machines_list:
+        model_counts[m] = model_counts.get(m, 0) + 1
+    
+    unique_models = list(model_counts.keys())
+    total_units = sum(model_counts.values())
+    
+    prefix = "v_" if grade_group == "v_group" else "s_"
+    single_closing = templates.get(f"{prefix}single_closing", DEFAULT_TEMPLATES[f"{prefix}single_closing"])
+    
+    if len(unique_models) == 1 and total_units == 1:
+        m = unique_models[0]
+        how = machine_formats.get(m, txt_default)
+        if "안녕하세요" in how or "사용량확인차" in how:
+            return f"{how}\n(기종: {m})\n{single_closing}"
+        greeting = templates.get(f"{prefix}single_greeting", DEFAULT_TEMPLATES[f"{prefix}single_greeting"])
+        return f"{greeting}\n\n▶ 기종: {m}\n▶ 방법: {how}\n\n{single_closing}"
+    
+    raw_greeting = templates.get(f"{prefix}multi_greeting", DEFAULT_TEMPLATES[f"{prefix}multi_greeting"])
+    greeting = raw_greeting.replace("{total}", str(total_units))
+    closing = templates.get(f"{prefix}multi_closing", DEFAULT_TEMPLATES[f"{prefix}multi_closing"])
+    
+    lines = [greeting, ""]
+    for idx, (m, count) in enumerate(model_counts.items(), 1):
+        how = machine_formats.get(m, txt_default)
+        suffix = f" ({count}대)" if count > 1 else ""
+        lines.append(f"▶ 기종{idx}: {m}{suffix}")
+        lines.append(f"    방법: {how}\n")
+    lines.append(closing)
+    return "\n".join(lines)
+
+
+# 7. 세션 상태 초기화 및 통합 세팅 로드
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "main"
+
+if "all_settings" not in st.session_state:
+    st.session_state.all_settings = load_settings()
+
+if "selected_region" not in st.session_state:
+    st.session_state.selected_region = list(st.session_state.all_settings.keys())[0]
+
+if "contact_labels" not in st.session_state:
+    st.session_state.contact_labels = {}
+
+
+# 8. 상단 헤더 + 네비게이션 및 [지역 선택 셀렉트박스] 추가
+nav_col1, nav_col2, nav_col3 = st.columns([4, 3, 2])
+with nav_col1:
+    st.title("퍼스트전산 마감 도우미 📱")
+with nav_col2:
+    st.write("")
+    region_options = list(st.session_state.all_settings.keys())
+    
+    if st.session_state.selected_region not in region_options:
+        st.session_state.selected_region = region_options[0]
+        
+    default_idx = region_options.index(st.session_state.selected_region)
+    
+    selected_reg = st.selectbox(
+        "📍 현재 작업 지역 선택", 
+        options=region_options, 
+        index=default_idx,
+        key="region_selectbox_key",  # 고유 키 고정
+        help="선택한 지역의 인사말과 기종별 설명 문구 세트가 자동으로 적용됩니다."
+    )
+    st.session_state.selected_region = selected_reg
+
+with nav_col3:
+    st.write("")
+    st.write("")
+    if st.session_state.current_page == "main":
+        if st.button("⚙️ 문구 & 지역 설정", use_container_width=True):
+            st.session_state.current_page = "settings"
+            st.rerun()
+    else:
+        if st.button("🏠 메인으로", use_container_width=True):
+            st.session_state.current_page = "main"
+            st.rerun()
+
+current_region = st.session_state.selected_region
+active_machines = st.session_state.all_settings[current_region]["machines"]
+active_templates = st.session_state.all_settings[current_region]["templates"]
+
+
+# ============================================================
+# 설정 페이지
+# ============================================================
+if st.session_state.current_page == "settings":
+    st.subheader(f"🛠️ [{current_region}] 등급별 양식 관리 및 프로필 설정")
+    st.caption("선택한 지역의 등급별 단일/여러기기 문자 양식을 커스텀 수정 및 저장합니다.")
+    
+    with st.expander("🌍 지역(프로필) 생성 및 삭제 관리", expanded=False):
+        st.markdown("##### ➕ 새로운 지역 추가")
+        new_reg_name = st.text_input("새 지역/담당자 이름 입력", key="new_region_input_text")
+        if st.button("🚀 신규 지역 프로필 생성", type="secondary"):
+            if new_reg_name.strip():
+                if new_reg_name.strip() not in st.session_state.all_settings:
+                    st.session_state.all_settings[new_reg_name.strip()] = {
+                        "machines": copy.deepcopy(DEFAULT_FORMATS),
+                        "templates": copy.deepcopy(DEFAULT_TEMPLATES)
+                    }
+                    save_settings(st.session_state.all_settings)
+                    st.session_state.selected_region = new_reg_name.strip()
+                    st.success(f"✅ [{new_reg_name.strip()}] 프로필이 생성되었습니다.")
+                    st.rerun()
+                else:
+                    st.error("⚠️ 이미 존재하는 지역 이름입니다.")
+            else:
+                st.warning("⚠️ 지역 이름을 입력해 주세요.")
                 
-            # 서식 콤보박스
-            cb_fmt = QComboBox()
-            cb_fmt.addItems(format_options)
+        st.markdown("---")
+        st.markdown("##### ❌ 현재 지역 프로필 삭제")
+        if st.button(f"🗑️ {current_region} 프로필 완전히 삭제", type="primary", disabled=(len(st.session_state.all_settings) <= 1)):
+            del st.session_state.all_settings[current_region]
+            save_settings(st.session_state.all_settings)
+            st.session_state.selected_region = list(st.session_state.all_settings.keys())[0]
+            st.success("✅ 프로필이 정상 삭제되었습니다.")
+            st.rerun()
+
+    if f"edit_temp_{current_region}" not in st.session_state:
+        st.session_state[f"edit_temp_{current_region}"] = copy.deepcopy(active_templates)
+    if f"edit_mach_{current_region}" not in st.session_state:
+        st.session_state[f"edit_mach_{current_region}"] = copy.deepcopy(active_machines)
+        
+    edited_templates = st.session_state[f"edit_temp_{current_region}"]
+    edited_machines = st.session_state[f"edit_mach_{current_region}"]
+    
+    with st.expander("📝 🟢 [S, NN, N 급] 전용 문자 양식 편집", expanded=True):
+        st.markdown("##### 📄 단일 기기 발송용 (S/NN/N급)")
+        edited_templates["s_single_greeting"] = st.text_area(
+            "인사말 (단일 - S/NN/N)", value=edited_templates.get("s_single_greeting", DEFAULT_TEMPLATES["s_single_greeting"]), key=f"s_sg_{current_region}"
+        )
+        edited_templates["s_single_closing"] = st.text_area(
+            "마무리말 (단일 - S/NN/N)", value=edited_templates.get("s_single_closing", DEFAULT_TEMPLATES["s_single_closing"]), key=f"s_sc_{current_region}"
+        )
+        st.markdown("##### 📚 여러 기기 통합 발송용 (S/NN/N급)")
+        edited_templates["s_multi_greeting"] = st.text_area(
+            "인사말 (통합 - S/NN/N) — `{total}` 사용 가능", value=edited_templates.get("s_multi_greeting", DEFAULT_TEMPLATES["s_multi_greeting"]), key=f"s_mg_{current_region}"
+        )
+        edited_templates["s_multi_closing"] = st.text_area(
+            "마무리말 (통합 - S/NN/N)", value=edited_templates.get("s_multi_closing", DEFAULT_TEMPLATES["s_multi_closing"]), key=f"s_mc_{current_region}"
+        )
+
+    with st.expander("📝 💎 [V, SS 급] 전용 문자 양식 편집", expanded=True):
+        st.markdown("##### 📄 단일 기기 발송용 (V, SS급)")
+        edited_templates["v_single_greeting"] = st.text_area(
+            "인사말 (단일 - V/SS)", value=edited_templates.get("v_single_greeting", DEFAULT_TEMPLATES["v_single_greeting"]), key=f"v_sg_{current_region}"
+        )
+        edited_templates["v_single_closing"] = st.text_area(
+            "마무리말 (단일 - V/SS)", value=edited_templates.get("v_single_closing", DEFAULT_TEMPLATES["v_single_closing"]), key=f"v_sc_{current_region}"
+        )
+        st.markdown("##### 📚 여러 기기 통합 발송용 (V, SS급)")
+        edited_templates["v_multi_greeting"] = st.text_area(
+            "인사말 (통합 - V/SS) — `{total}` 사용 가능", value=edited_templates.get("v_multi_greeting", DEFAULT_TEMPLATES["v_multi_greeting"]), key=f"v_mg_{current_region}"
+        )
+        edited_templates["v_multi_closing"] = st.text_area(
+            "마무리말 (통합 - V/SS)", value=edited_templates.get("v_multi_closing", DEFAULT_TEMPLATES["v_multi_closing"]), key=f"v_mc_{current_region}"
+        )
+        
+    machine_groups = {
+        "📠 신도리코 (N/D 시리즈)": ["N500", "N501", "N502", "N600", "N601", "D320", "D400", "D410", "D420", "D450", "D460", "D470"],
+        "📠 교세라 (ECOSYS / MA2101)": ["MA2100", "M5526", "M5521", "ECOSYS", "MA2101"],
+        "📠 후지 Apeos (C 시리즈)": ["C2263", "C2265", "C2061", "C3067", "C2260", "C2270", "C2275", "C3375", "C4475", "C5575", "C2271", "C2273", "C3371", "C3373", "C3070", "C3570", "C4570", "C5570", "C7070", "Apeos"],
+        "📠 리코": ["2554", "C3003", "C4504"],
+        "📠 삼성 복합기": ["Mx6", "X3220NR", "K3250", "X-9201", "X4-시리즈", "K4-시리즈", "X7-시리즈", "K7-시리즈", "SL-"],
+        "📠 HP / 렉스마크 / 브라더": ["HP", "410", "Lexmark", "5700", "L5100"],
+        "📠 기타 단일 모델": ["305", "5473", "5005"],
+        "📠 공통 / 기본값": ["기본 기종"]
+    }
+    
+    st.markdown(f"### 🔧 [{current_region}] 기종별 안내 문구 (방법 설명)")
+    for group_name, machines in machine_groups.items():
+        with st.expander(group_name, expanded=False):
+            for m in machines:
+                if m in edited_machines:
+                    edited_machines[m] = st.text_area(
+                        f"**{m}**", value=edited_machines[m], height=100, key=f"edit_m_{current_region}_{m}"
+                    )
+    
+    st.markdown("---")
+    col_s1, col_s2, _ = st.columns([2, 2, 4])
+    with col_s1:
+        if st.button("💾 변경사항 저장", type="primary", use_container_width=True):
+            st.session_state.all_settings[current_region]["machines"] = copy.deepcopy(edited_machines)
+            st.session_state.all_settings[current_region]["templates"] = copy.deepcopy(edited_templates)
+            if save_settings(st.session_state.all_settings):
+                st.success(f"✅ [{current_region}] 지역의 전용 문구 세트 저장 완료!")
+                st.rerun()
+    with col_s2:
+        if st.button("🔄 현재 지역 기본값 초기화", use_container_width=True):
+            st.session_state.all_settings[current_region]["machines"] = copy.deepcopy(DEFAULT_FORMATS)
+            st.session_state.all_settings[current_region]["templates"] = copy.deepcopy(DEFAULT_TEMPLATES)
+            st.session_state[f"edit_temp_{current_region}"] = copy.deepcopy(DEFAULT_TEMPLATES)
+            st.session_state[f"edit_mach_{current_region}"] = copy.deepcopy(DEFAULT_FORMATS)
+            save_settings(st.session_state.all_settings)
+            st.success(f"✅ [{current_region}] 프로필 문구가 초기 기본값으로 원복되었습니다.")
+            st.rerun()
+
+
+# ============================================================
+# 메인 페이지
+# ============================================================
+else:
+    st.caption(f"현재 **🚨 [{current_region}] 🚨** 세팅으로 문자가 변환됩니다.")
+    
+    st.markdown(
+        """<style>
+        div[data-testid="stTextArea"] textarea {
+            overflow-y: hidden !important; height: auto !important;
+            min-height: 200px !important; max-height: none !important;
+        }</style>""",
+        unsafe_allow_html=True
+    )
+    
+    def clear_text_area():
+        st.session_state["text_input_area"] = ""
+        keys_to_delete = [k for k in list(st.session_state.keys())
+                          if k.startswith(("final_nm_", "final_ph_", "final_mc_", "final_gd_", "nm_", "ph_", "mc_"))]
+        for k in keys_to_delete:
+            del st.session_state[k]
+        st.session_state.contact_labels = {}
+    
+    raw_text = st.text_area("카톡 내용 붙여넣기:", key="text_input_area")
+    
+    col_btn1, col_btn2, _ = st.columns([1.5, 1.5, 5])
+    with col_btn1:
+        st.button("🗑️ 입력 내용 전체 초기화", on_click=clear_text_area, use_container_width=True)
+    with col_btn2:
+        analyze_clicked = st.button("🔍 마감 문자 변환하기", type="primary", use_container_width=True)
+    
+    # 입력 내용이 바뀌었는데도 이전 분석 결과가 세션에 남아
+    # 엉뚱한 업체명/번호/기종이 그대로 재사용되는 문제를 막는다.
+    def reset_detection_cache():
+        stale = [k for k in list(st.session_state.keys())
+                 if k.startswith(("final_nm_", "final_ph_", "final_mc_", "final_gd_",
+                                  "nm_", "ph_", "mc_", "gd_"))]
+        for k in stale:
+            del st.session_state[k]
+        st.session_state.contact_labels = {}
+    
+    text_fingerprint = hash(raw_text or "")
+    if st.session_state.get("_text_fingerprint") != text_fingerprint:
+        st.session_state["_text_fingerprint"] = text_fingerprint
+        reset_detection_cache()
+    
+    if analyze_clicked:
+        reset_detection_cache()
+    
+    st.markdown("---")
+    
+    if raw_text and raw_text.strip():
+        split_pattern = r'((?<=\n)\d+(?:\s*,\s*)\d*[A-Z]*)|(^\d+(?:\s*,\s*)\d*[A-Z]*)'
+        raw_parts = re.split(split_pattern, raw_text)
+        
+        blocks, current_block = [], ""
+        for part in raw_parts:
+            if part is None: continue
+            if re.match(r'^\d+(?:\s*,\s*)', part.strip()):
+                if current_block.strip(): blocks.append(current_block.strip())
+                current_block = part
+            else:
+                current_block += part
+        if current_block.strip(): blocks.append(current_block.strip())
+        
+        valid_blocks = [b.strip() for b in blocks if len(b.strip()) > 5 and re.match(r'^\d+(?:\s*,\s*)', b.strip())]
+        if not valid_blocks:
+            valid_blocks = [raw_text.strip()]
+        
+        machine_options = list(active_machines.keys())
+        exclude_machines = ["기본 기종", "X3220NR", "K3250", "X-9201", "Mx6", "X4-시리즈", "K4-시리즈", "X7-시리즈", "K7-시리즈", "SL-", "HP", "410", "Lexmark"]
+        
+        sms_data_list = []
+        for i, block in enumerate(valid_blocks, 1):
+            contacts = extract_contacts(block)
+            clean_phones = [c["phone"] for c in contacts]
             
-            # 자동 매핑
-            model = str(row.get('기종', ''))
-            matched = False
-            for key, fmt_func in DEFAULT_FORMATS.items():
-                if key.lower() in model.lower():
-                    if fmt_func == txt_samsung: cb_fmt.setCurrentText("삼성")
-                    elif fmt_func == txt_sinoh: cb_fmt.setCurrentText("신도리코")
-                    elif fmt_func == txt_ecosys: cb_fmt.setCurrentText("교세라 ECOSYS")
-                    elif fmt_func == txt_kyocera_m2101: cb_fmt.setCurrentText("교세라 MA2101")
-                    elif fmt_func == txt_305: cb_fmt.setCurrentText("교세라 305")
-                    elif fmt_func == txt_5473: cb_fmt.setCurrentText("교세라 5473")
-                    matched = True
+            for c in contacts:
+                if c["label"] and c["phone"] not in st.session_state.contact_labels:
+                    st.session_state.contact_labels[c["phone"]] = c["label"]
+            
+            detected_phone_str = ", ".join(clean_phones) if clean_phones else ""
+            
+            lines = [l.strip() for l in block.split('\n') if l.strip()]
+            
+            if lines:
+                first_line = lines[0]
+                grade_group, detected_clean_name = parse_company_and_grade(first_line)
+            else:
+                grade_group, detected_clean_name = "s_group", "거래처 확인 바람"
+            
+            matched_machine = "기본 기종"
+            block_lower = machine_search_text(block)
+            
+            if "mx6" in block_lower or "mx-6" in block_lower: matched_machine = "Mx6"
+            elif machine_key_hit("3250", block_lower): matched_machine = "K3250"
+            elif machine_key_hit("3220", block_lower): matched_machine = "X3220NR"
+            elif machine_key_hit("9201", block_lower): matched_machine = "X-9201"
+            elif re.search(r'[xk]-?4\d{3}', block_lower) or "x4" in block_lower or "k4" in block_lower: matched_machine = "X4-시리즈"
+            elif re.search(r'[xk]-?7\d{3}', block_lower) or "x7" in block_lower or "k7" in block_lower: matched_machine = "X7-시리즈"
+            elif "sl-" in block_lower: matched_machine = "SL-"
+            elif "ma2101" in block_lower or "m2101" in block_lower: matched_machine = "MA2101"
+            elif "ma2100" in block_lower: matched_machine = "MA2100"
+            elif "hp" in block_lower: matched_machine = "HP"
+            elif machine_key_hit("410", block_lower): matched_machine = "410"
+            elif "lexmark" in block_lower or "렉스마크" in block_lower: matched_machine = "Lexmark"
+            elif "mp-c2003" in block_lower or "c2003" in block_lower: matched_machine = "C3003"
+            else:
+                for k in machine_options:
+                    if k not in exclude_machines and machine_key_hit(k, block_lower):
+                        matched_machine = k
+                        break
+            
+            if f"final_nm_{i}" not in st.session_state: st.session_state[f"final_nm_{i}"] = detected_clean_name
+            if f"final_ph_{i}" not in st.session_state: st.session_state[f"final_ph_{i}"] = detected_phone_str
+            if f"final_mc_{i}" not in st.session_state: st.session_state[f"final_mc_{i}"] = matched_machine
+            if f"final_gd_{i}" not in st.session_state: st.session_state[f"final_gd_{i}"] = grade_group
+            
+            sms_data_list.append({"index": i, "block_raw": block})
+        
+        grouped = OrderedDict()
+        phone_to_group_id = {}
+        no_phone_counter = 0
+        
+        for s_info in sms_data_list:
+            i = s_info["index"]
+            cur_name = st.session_state.get(f"nm_{i}_first", st.session_state[f"final_nm_{i}"]).strip()
+            cur_phone = st.session_state.get(f"ph_{i}_first", st.session_state[f"final_ph_{i}"])
+            cur_machine = st.session_state.get(f"mc_{i}_first", st.session_state[f"final_mc_{i}"])
+            cur_grade = st.session_state.get(f"gd_{i}_first", st.session_state[f"final_gd_{i}"])
+            
+            block_phones = []
+            for p in re.split(r'[\s,]+', cur_phone):
+                p_clean = re.sub(r'[^0-9]', '', p.strip())
+                if p_clean: block_phones.append(p_clean)
+            
+            target_group_id = None
+            for p_clean in block_phones:
+                potential_id = f"{cur_grade}_{p_clean}"
+                if potential_id in phone_to_group_id:
+                    target_group_id = phone_to_group_id[potential_id]
                     break
-            if not matched:
-                cb_fmt.setCurrentText("삼성")
-                
-            self.table.setCellWidget(row_idx, len(headers) - 1, cb_fmt)
             
-        self.table.header().setSectionResizeMode(QHeaderView.ResizeToContents)
-
-    def open_context_menu(self, position):
-        menu = QMenu()
-        select_all = menu.addAction("전체 선택")
-        deselect_all = menu.addAction("전체 해제")
-        action = menu.exec_(self.table.viewport().mapToGlobal(position))
-        
-        if action == select_all:
-            for r in range(self.table.rowCount()):
-                widget = self.table.cellWidget(r, 0)
-                if isinstance(widget, QCheckBox):
-                    widget.setChecked(True)
-        elif action == deselect_all:
-            for r in range(self.table.rowCount()):
-                widget = self.table.cellWidget(r, 0)
-                if isinstance(widget, QCheckBox):
-                    widget.setChecked(False)
-
-    def print_selected(self):
-        printer_name = self.cb_printer.currentText()
-        if not printer_name:
-            QMessageBox.warning(self, "경고", "프린터를 선택해주세요.")
-            return
-
-        fmt_map = {
-            "삼성": txt_samsung,
-            "신도리코": txt_sinoh,
-            "교세라 ECOSYS": txt_ecosys,
-            "교세라 MA2101": txt_kyocera_m2101,
-            "교세라 305": txt_305,
-            "교세라 5473": txt_5473
-        }
-
-        cols = list(self.df.columns) if self.df is not None else []
-        printed_count = 0
-
-        for r in range(self.table.rowCount()):
-            chk = self.table.cellWidget(r, 0)
-            if chk and chk.isChecked():
-                row_data = {}
-                for c_idx, c_name in enumerate(cols):
-                    item = self.table.item(r, c_idx + 1)
-                    row_data[c_name] = item.text() if item else ""
+            if not target_group_id:
+                if block_phones:
+                    target_group_id = f"{cur_grade}_{cur_name}"
+                else:
+                    no_phone_counter += 1
+                    target_group_id = f"NO_PHONE_GROUP_{cur_grade}_{no_phone_counter}"
+            
+            if target_group_id not in grouped:
+                grouped[target_group_id] = {
+                    "display_name": cur_name,
+                    "phones": [],
+                    "machines": [],
+                    "indices": [],
+                    "original_names": [],
+                    "grade_group": cur_grade
+                }
+            
+            for p_clean in block_phones:
+                if p_clean not in grouped[target_group_id]["phones"]:
+                    grouped[target_group_id]["phones"].append(p_clean)
+                phone_to_group_id[f"{cur_grade}_{p_clean}"] = target_group_id
                 
-                cb_fmt = self.table.cellWidget(r, self.table.columnCount() - 1)
-                fmt_str = cb_fmt.currentText()
-                fmt_func = fmt_map.get(fmt_str, txt_samsung)
-                
-                self.generate_and_print(row_data, fmt_func, printer_name)
-                printed_count += 1
-
-        if printed_count > 0:
-            QMessageBox.information(self, "완료", f"{printed_count}개의 라벨 출력이 완료되었습니다.")
-        else:
-            QMessageBox.warning(self, "경고", "선택된 항목이 없습니다.")
-
-    def generate_and_print(self, row_data, fmt_func, printer_name):
-        buffer = io.BytesIO()
-        # 100mm x 75mm 크기 (포인트 단위: 1mm = 2.83465 pt)
-        w_pt = 100 * 2.83465
-        h_pt = 75 * 2.83465
+            grouped[target_group_id]["machines"].append(cur_machine)
+            grouped[target_group_id]["indices"].append(i)
+            
+            if cur_name not in grouped[target_group_id]["original_names"]:
+                grouped[target_group_id]["original_names"].append(cur_name)
         
-        c = canvas.Canvas(buffer, pagesize=(w_pt, h_pt))
+        group_keys = list(grouped.keys())
+        total_groups = len(group_keys)
+        total_machines = sum(len(grouped[n]["machines"]) for n in group_keys)
         
-        # 폰트 등록 (한글 지원)
-        try:
-            from reportlab.pdfbase import pdfmetrics
-            from reportlab.pdfbase.ttfonts import TTFont
-            pdfmetrics.registerFont(TTFont('Malgun', 'malgun.ttf'))
-            font_name = 'Malgun'
-        except:
-            font_name = 'Helvetica'
-
-        fmt_func(c, row_data, font_name, colors.black)
-        c.showPage()
-        c.save()
+        st.subheader(f"🚀 거래처별 발송 버튼 (지역: {current_region} / 총 {total_groups}개 그룹)")
         
-        buffer.seek(0)
-        pdf_bytes = buffer.getvalue()
+        def format_phone_with_name(phone):
+            label = st.session_state.contact_labels.get(phone, "")
+            formatted_p = f"{phone[:3]}-{phone[3:7]}-{phone[7:]}" if len(phone) == 11 else phone
+            if label: return f"👤 {label}    📞 {formatted_p}"
+            return f"📞 {formatted_p}"
+        
+        @st.dialog("📱 문자 전송 대상 및 내용 확인")
+        def show_send_popup(name, phones_list, msg, original_names=None):
+            st.warning("⚠️ 수신 번호를 확인 후 하단의 최종 전송 버튼을 눌러주세요.")
+            st.write(f"**대표 업체명:** {name}")
+            
+            if original_names and len(original_names) > 1:
+                with st.expander(f"📍 통합된 상세 위치/지점 이름 ({len(original_names)}개)", expanded=True):
+                    for n in original_names: st.markdown(f"- {n}")
+            
+            selected_number = ""
+            if len(phones_list) > 1:
+                selected_number = st.radio("수신 연락처 선택", options=phones_list, format_func=format_phone_with_name, index=0)
+            elif len(phones_list) == 1:
+                p = phones_list[0]
+                label = st.session_state.contact_labels.get(p, "")
+                formatted_p = f"{p[:3]}-{p[3:7]}-{p[7:]}" if len(p) == 11 else p
+                if label: st.write(f"**수신:** 👤 {label}    📞 {formatted_p}")
+                else: st.write(f"**수신 번호:** 📞 {formatted_p}")
+                selected_number = p
+            else:
+                st.error("❌ 등록된 수신 번호가 없습니다.")
+            
+            st.write("**📱 최종 전송 문구 미리보기:**")
+            st.code(msg, language=None)
+            
+            if selected_number:
+                target_num = re.sub(r'[^0-9]', '', selected_number)
+                target_label = st.session_state.contact_labels.get(target_num, "")
+                btn_text = f"✅ [{target_label}] 에게 전송" if target_label else f"✅ [{target_num}] 번호로 전송"
+                st.markdown(
+                    f'<a href="sms:{target_num}?body={urllib.parse.quote(msg)}" target="_self" '
+                    f'style="display: block; width: 100%; text-align: center; padding: 0.8rem; '
+                    f'background-color: #00CC66; color: white; text-decoration: none; '
+                    f'border-radius: 8px; font-weight: bold; font-size: 18px; margin-top: 15px;">'
+                    f'{btn_text}</a>',
+                    unsafe_allow_html=True
+                )
+        
+        tab_s, tab_v = st.tabs(["🟢 S, NN, N급 그룹 목록", "💎 V, SS급 그룹 목록"])
+        
+        # 🟢 1. S, NN, N급 탭 복구 완료
+        with tab_s:
+            s_keys = [k for k in group_keys if grouped[k]["grade_group"] == "s_group"]
+            if not s_keys: 
+                st.caption("감지된 S, NN, N급 업체가 없습니다.")
+            else:
+                btn_cols_s = st.columns(4)
+                for g_idx, gkey in enumerate(s_keys):
+                    info = grouped[gkey]
+                    phones, machines, display_name, original_names = info["phones"], info["machines"], info["display_name"], info["original_names"]
+                    
+                    # 수신용 메시지 빌드
+                    generated_msg = build_message_by_grade(machines, active_machines, active_templates, "s_group")
+                    
+                    # 4열 배치 시스템 구현
+                    with btn_cols_s[g_idx % 4]:
+                        button_label = f"🟢 {display_name} ({len(machines)}대)"
+                        if st.button(button_label, key=f"btn_s_{gkey}", use_container_width=True):
+                            show_send_popup(display_name, phones, generated_msg, original_names)
 
-        # PDF -> 이미지 변환 후 프린터 전송
-        try:
-            images = convert_from_bytes(pdf_bytes, poppler_path=poppler_path if os.path.exists(poppler_path) else None)
-            for img in images:
-                bmp_buffer = io.BytesIO()
-                img.save(bmp_buffer, format='BMP')
-                bmp_bytes = bmp_buffer.getvalue()
-                
-                hprinter = win32print.OpenPrinter(printer_name)
-                try:
-                    hdc = win32print.StartDocPrinter(hprinter, 1, ("Label Print", None, "RAW"))
-                    win32print.StartPagePrinter(hprinter)
-                    win32print.WritePrinter(hprinter, bmp_bytes)
-                    win32print.EndPagePrinter(hprinter)
-                    win32print.EndDocPrinter(hprinter)
-                finally:
-                    win32print.ClosePrinter(hprinter)
-        except Exception as e:
-            print(f"출력 실패: {e}")
-
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    ex = LabelPrinterApp()
-    ex.show()
-    sys.exit(app.exec_())
+        # 💎 2. V, SS급 탭 복구 완료
+        with tab_v:
+            v_keys = [k for k in group_keys if grouped[k]["grade_group"] == "v_group"]
+            if not v_keys:
+                st.caption("감지된 V, SS급 업체가 없습니다.")
+            else:
+                btn_cols_v = st.columns(4)
+                for g_idx, gkey in enumerate(v_keys):
+                    info = grouped[gkey]
+                    phones, machines, display_name, original_names = info["phones"], info["machines"], info["display_name"], info["original_names"]
+                    
+                    # 수신용 메시지 빌드
+                    generated_msg = build_message_by_grade(machines, active_machines, active_templates, "v_group")
+                    
+                    # 4열 배치 시스템 구현
+                    with btn_cols_v[g_idx % 4]:
+                        button_label = f"💎 {display_name} ({len(machines)}대)"
+                        if st.button(button_label, key=f"btn_v_{gkey}", use_container_width=True):
+                            show_send_popup(display_name, phones, generated_msg, original_names)
