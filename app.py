@@ -1,16 +1,3 @@
-제공해주신 전체 코드를 분석해보니, 맨 아랫줄 `with tab_s:` 부분 바로 밑에 들여쓰기가 잔뜩 밀려난 채로 코드가 뚝 끊겨 있는 상태였습니다.
-
-이 때문에 `IndentationError`가 발생하여 Streamlit 앱 자체가 구동되지 않았고, 결과적으로 화면에 버튼이 전혀 나오지 않았던 것입니다.
-
-또한 코드 내부적으로 S그룹(S, NN, N급)과 **V그룹(V, SS급)** 탭을 나누어 버튼을 4열(`st.columns(4)`)로 배치하려고 했던 의도가 파악되어, 끊긴 로직을 완벽하게 복구하고 들여쓰기 오류를 모두 잡은 전체 코드를 작성했습니다.
-
----
-
-### 🛠️ 수정 및 복구 완료된 전체 코드
-
-아래의 코드를 복사해서 `app.py` 파일에 붙여넣기(`Ctrl + A` 후 `Ctrl + V`) 하시면 정상적으로 작동합니다.
-
-```python
 import streamlit as st
 import re
 import urllib.parse
@@ -287,7 +274,7 @@ def build_message_by_grade(machines_list, machine_formats, templates, grade_grou
         how = machine_formats.get(m, txt_default)
         suffix = f" ({count}대)" if count > 1 else ""
         lines.append(f"▶ 기종{idx}: {m}{suffix}")
-        lines.append(f"    방법: {how}\n")
+        lines.append(f"   방법: {how}\n")
     lines.append(closing)
     return "\n".join(lines)
 
@@ -306,7 +293,7 @@ if "contact_labels" not in st.session_state:
     st.session_state.contact_labels = {}
 
 
-# 8. 상단 헤더 + 네비게이션 및 [지역 선택 셀렉트박스] 추가
+# 8. 상단 헤더 + 네비게이션 및 [지역 선택 셀렉트박스]
 nav_col1, nav_col2, nav_col3 = st.columns([4, 3, 2])
 with nav_col1:
     st.title("퍼스트전산 마감 도우미 📱")
@@ -323,7 +310,7 @@ with nav_col2:
         "📍 현재 작업 지역 선택", 
         options=region_options, 
         index=default_idx,
-        key="region_selectbox_key",  # 고유 키 고정
+        key="region_selectbox_key", 
         help="선택한 지역의 인사말과 기종별 설명 문구 세트가 자동으로 적용됩니다."
     )
     st.session_state.selected_region = selected_reg
@@ -665,44 +652,34 @@ else:
         
         tab_s, tab_v = st.tabs(["🟢 S, NN, N급 그룹 목록", "💎 V, SS급 그룹 목록"])
         
-        # 🟢 1. S, NN, N급 탭 복구 완료
+        # 🟢 1. S, NN, N급 탭
         with tab_s:
             s_keys = [k for k in group_keys if grouped[k]["grade_group"] == "s_group"]
-            if not s_keys: 
+            if not s_keys:
                 st.caption("감지된 S, NN, N급 업체가 없습니다.")
             else:
-                btn_cols_s = st.columns(4)
-                for g_idx, gkey in enumerate(s_keys):
-                    info = grouped[gkey]
-                    phones, machines, display_name, original_names = info["phones"], info["machines"], info["display_name"], info["original_names"]
-                    
-                    # 수신용 메시지 빌드
-                    generated_msg = build_message_by_grade(machines, active_machines, active_templates, "s_group")
-                    
-                    # 4열 배치 시스템 구현
-                    with btn_cols_s[g_idx % 4]:
-                        button_label = f"🟢 {display_name} ({len(machines)}대)"
-                        if st.button(button_label, key=f"btn_s_{gkey}", use_container_width=True):
-                            show_send_popup(display_name, phones, generated_msg, original_names)
+                cols = st.columns(4)
+                for idx, key in enumerate(s_keys):
+                    g_info = grouped[key]
+                    c_idx = idx % 4
+                    with cols[c_idx]:
+                        msg = build_message_by_grade(g_info["machines"], active_machines, active_templates, "s_group")
+                        btn_label = f"📱 {g_info['display_name']} ({len(g_info['machines'])}대)"
+                        if st.button(btn_label, key=f"btn_s_{key}_{idx}", use_container_width=True):
+                            show_send_popup(g_info["display_name"], g_info["phones"], msg, g_info["original_names"])
 
-        # 💎 2. V, SS급 탭 복구 완료
+        # 💎 2. V, SS급 탭
         with tab_v:
             v_keys = [k for k in group_keys if grouped[k]["grade_group"] == "v_group"]
             if not v_keys:
                 st.caption("감지된 V, SS급 업체가 없습니다.")
             else:
-                btn_cols_v = st.columns(4)
-                for g_idx, gkey in enumerate(v_keys):
-                    info = grouped[gkey]
-                    phones, machines, display_name, original_names = info["phones"], info["machines"], info["display_name"], info["original_names"]
-                    
-                    # 수신용 메시지 빌드
-                    generated_msg = build_message_by_grade(machines, active_machines, active_templates, "v_group")
-                    
-                    # 4열 배치 시스템 구현
-                    with btn_cols_v[g_idx % 4]:
-                        button_label = f"💎 {display_name} ({len(machines)}대)"
-                        if st.button(button_label, key=f"btn_v_{gkey}", use_container_width=True):
-                            show_send_popup(display_name, phones, generated_msg, original_names)
-
-```
+                cols = st.columns(4)
+                for idx, key in enumerate(v_keys):
+                    g_info = grouped[key]
+                    c_idx = idx % 4
+                    with cols[c_idx]:
+                        msg = build_message_by_grade(g_info["machines"], active_machines, active_templates, "v_group")
+                        btn_label = f"💎 {g_info['display_name']} ({len(g_info['machines'])}대)"
+                        if st.button(btn_label, key=f"btn_v_{key}_{idx}", use_container_width=True):
+                            show_send_popup(g_info["display_name"], g_info["phones"], msg, g_info["original_names"])
