@@ -35,7 +35,7 @@ DEFAULT_FORMATS = {
     "D320": txt_sindo, "D400": txt_sindo, "D410": txt_sindo, "D420": txt_sindo, "D450": txt_sindo,
     "D460": txt_sindo, "D470": txt_sindo, 
     "MA2100": txt_ecosys, "M5526": txt_ecosys, "M5521": txt_ecosys, "ECOSYS": txt_ecosys, 
-    "M2101": txt_kyocera_m2101,
+    "MA2101": txt_kyocera_m2101,
     "305": txt_305, "5473": txt_5473, 
     "C2263": txt_apeos, "C2265": txt_apeos, "C2061": txt_apeos, "C3067": txt_apeos, "C2260": txt_apeos, 
     "C2270": txt_apeos, "C2275": txt_apeos, "C3375": txt_apeos, "C4475": txt_apeos, "C5575": txt_apeos, 
