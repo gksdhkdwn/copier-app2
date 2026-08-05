@@ -25,7 +25,7 @@ txt_5005 = "사양설정 > 리포트 > 기능설정리스트 확인 후 문자�
 txt_sam_mx6 = "홈 화면에서 우측으로 넘기시고, 보고서-구성/상태 페이지-사용페이지-프린트모양 인쇄버튼 누르고 사진찍어 보내주시면 됩니다."
 txt_sam_keypad = "복사기 숫자 키패드 위 카운터 클릭 후 화면에서 인쇄 눌러주시고 나온 출력물 사진찍어 보내주시면 됩니다."
 txt_sam_xk47 = "설정 → 왼쪽 쭉 내리다보면 리포트 누름 → 오른쪽 사용량 정보 클릭하여 확인 후 문자로 부탁드립니다."
-txt_kyocera_m2101 = "화면 맨 밑 가운데에 점3개(***)를 눌러주세요. 화살표 아래로한번-카운터 확인-기본설정-인쇄페이지 수-화살표 아래로한번 내리신 후 사진찍어 보내주시면 됩니다. (시리얼넘버도 필요하면 그 위에 상태페이지 인쇄 누르기)"
+txt_kyocera_MA2101 = "화면 맨 밑 가운데에 점3개(***)를 눌러주세요. 화살표 아래로한번-카운터 확인-기본설정-인쇄페이지 수-화살표 아래로한번 내리신 후 사진찍어 보내주시면 됩니다. (시리얼넘버도 필요하면 그 위에 상태페이지 인쇄 누르기)"
 txt_hp_common = "메인화면 상단 스크롤 내려주시고 톱니바퀴 아이콘 눌러주세요. 목록 하단에 보고서 눌러주시고 상태보고서 찾아서 인쇄하신 후 사진찍어 보내주시면 됩니다."
 txt_lexmark_410 = "집모양-스패너모양-보고서-장치통계-장치통계 페이지2번 사진찍어서 보내주시면 됩니다."
 txt_default = "기기 화면의 카운터 메뉴에서 사용량 확인 후 사진 한 장만 문자나 카톡으로 발송 부탁드립니다."
@@ -35,7 +35,7 @@ DEFAULT_FORMATS = {
     "D320": txt_sindo, "D400": txt_sindo, "D410": txt_sindo, "D420": txt_sindo, "D450": txt_sindo,
     "D460": txt_sindo, "D470": txt_sindo, 
     "MA2100": txt_ecosys, "M5526": txt_ecosys, "M5521": txt_ecosys, "ECOSYS": txt_ecosys, 
-    "MA2101": txt_kyocera_m2101,
+    "MA2101": txt_kyocera_MA2101,
     "305": txt_305, "5473": txt_5473, 
     "C2263": txt_apeos, "C2265": txt_apeos, "C2061": txt_apeos, "C3067": txt_apeos, "C2260": txt_apeos, 
     "C2270": txt_apeos, "C2275": txt_apeos, "C3375": txt_apeos, "C4475": txt_apeos, "C5575": txt_apeos, 
@@ -207,74 +207,44 @@ def extract_contacts(block):
             continue
         seen.add(clean)
         
-        # 이름 탐색 범위를 '번호가 놓인 줄' 안으로 제한한다.
-        # (줄을 넘어가면 다음 사람의 이름을 끌어와 라벨이 뒤엉킨다)
-        line_start = block.rfind('\n', 0, m.start()) + 1
-        line_end = block.find('\n', m.end())
-        if line_end == -1:
-            line_end = len(block)
-
-        before_start = max(line_start, m.start() - 60)
-        if idx > 0 and phone_matches[idx - 1].end() > before_start:
-            before_start = phone_matches[idx - 1].end()
+        before_start = phone_matches[idx-1].end() if idx > 0 else max(0, m.start() - 60)
         before = block[before_start:m.start()]
-
-        after_end = min(line_end, m.end() + 40)
-        if idx + 1 < len(phone_matches) and phone_matches[idx + 1].start() < after_end:
-            after_end = phone_matches[idx + 1].start()
+        after_end = phone_matches[idx+1].start() if idx + 1 < len(phone_matches) else min(len(block), m.end() + 40)
         after = block[m.end():after_end]
-
-        # 한국식 표기는 '이름 직급 번호' 순서가 압도적이므로 before를 먼저 본다.
+        
         label = ""
-        ma = re.search(rf'(?:^|[\s/,:·\-()])({NAME_RE})\s*({TITLE_RE})\s*[:\-\s/()]*$', before)
+        ma = re.search(rf'^\s*[:\-\s/,·()]*\s*({NAME_RE})\s*({TITLE_RE})', after)
         if ma and ma.group(1) not in NON_NAME_WORDS:
             label = f"{ma.group(1)} {ma.group(2)}"
         if not label:
-            ma = re.search(rf'({TITLE_RE})\s+({NAME_RE})\s*[:\-\s/()]*$', before)
-            if ma and ma.group(2) not in NON_NAME_WORDS:
-                label = f"{ma.group(2)} {ma.group(1)}"
-        if not label:
-            ma = re.search(rf'^\s*[:\-\s/,·()]*\s*({NAME_RE})\s*({TITLE_RE})', after)
+            ma = re.search(rf'(?:^|[\s/,:·\-()])({NAME_RE})\s*({TITLE_RE})\s*[:\-\s/()]*$', before)
             if ma and ma.group(1) not in NON_NAME_WORDS:
                 label = f"{ma.group(1)} {ma.group(2)}"
         if not label:
             ma = re.search(rf'^\s*[:\-\s/,·()]*\s*({TITLE_RE})\s+({NAME_RE})', after)
             if ma and ma.group(2) not in NON_NAME_WORDS:
                 label = f"{ma.group(2)} {ma.group(1)}"
-
         if not label:
-            name = _find_name_before(before)
-            if name: label = name
+            ma = re.search(rf'({TITLE_RE})\s+({NAME_RE})\s*[:\-\s/()]*$', before)
+            if ma and ma.group(2) not in NON_NAME_WORDS:
+                label = f"{ma.group(2)} {ma.group(1)}"
+                
         if not label:
             name = _find_name_after(after)
             if name: label = name
-
         if not label:
-            ma = re.search(rf'(?:^|[\s/,:·\-()])({TITLE_RE})\s*[:\-\s/()]*$', before)
-            if ma: label = ma.group(1)
+            name = _find_name_before(before)
+            if name: label = name
+            
         if not label:
             ma = re.search(rf'^\s*[:\-\s/,·()]*\s*({TITLE_RE})', after)
+            if ma: label = ma.group(1)
+        if not label:
+            ma = re.search(rf'(?:^|[\s/,:·\-()])({TITLE_RE})\s*[:\-\s/()]*$', before)
             if ma: label = ma.group(1)
         
         results.append({"phone": clean, "label": label})
     return results
-
-LANDLINE_RE = r'0\d{1,2}[-.\s]?\d{3,4}[-.\s]?\d{4}'
-
-def machine_search_text(block):
-    """기종 매칭용 텍스트. 전화번호를 먼저 지운다.
-    (안 지우면 '010-4100-1234'가 렉스마크 410으로, '010-5700-...'이 5700으로 잡힌다)"""
-    t = re.sub(PHONE_RE, ' ', block)
-    t = re.sub(LANDLINE_RE, ' ', t)
-    return t.lower()
-
-def machine_key_hit(key, text):
-    """숫자만으로 된 기종코드(305, 410, 5700...)는 더 긴 숫자열의 일부로
-    걸리지 않도록 앞뒤 숫자 경계를 강제한다."""
-    k = key.lower()
-    if re.fullmatch(r'\d+', k):
-        return re.search(rf'(?<!\d){re.escape(k)}(?!\d)', text) is not None
-    return k in text
 
 def build_message_by_grade(machines_list, machine_formats, templates, grade_group):
     model_counts = OrderedDict()
@@ -454,7 +424,7 @@ if st.session_state.current_page == "settings":
             for m in machines:
                 if m in edited_machines:
                     edited_machines[m] = st.text_area(
-                        f"**{m}**", value=edited_machines[m], height=100, key=f"edit_m_{current_region}_{m}"
+                        f"**{m}**", value=edited_machines[m], height=100, key=f"edit_m_{m}"
                     )
     
     st.markdown("---")
@@ -508,24 +478,6 @@ else:
     with col_btn2:
         analyze_clicked = st.button("🔍 마감 문자 변환하기", type="primary", use_container_width=True)
     
-    # 입력 내용이 바뀌었는데도 이전 분석 결과가 세션에 남아
-    # 엉뚱한 업체명/번호/기종이 그대로 재사용되는 문제를 막는다.
-    def reset_detection_cache():
-        stale = [k for k in list(st.session_state.keys())
-                 if k.startswith(("final_nm_", "final_ph_", "final_mc_", "final_gd_",
-                                  "nm_", "ph_", "mc_", "gd_"))]
-        for k in stale:
-            del st.session_state[k]
-        st.session_state.contact_labels = {}
-    
-    text_fingerprint = hash(raw_text or "")
-    if st.session_state.get("_text_fingerprint") != text_fingerprint:
-        st.session_state["_text_fingerprint"] = text_fingerprint
-        reset_detection_cache()
-    
-    if analyze_clicked:
-        reset_detection_cache()
-    
     st.markdown("---")
     
     if raw_text and raw_text.strip():
@@ -569,24 +521,24 @@ else:
                 grade_group, detected_clean_name = "s_group", "거래처 확인 바람"
             
             matched_machine = "기본 기종"
-            block_lower = machine_search_text(block)
+            block_lower = block.lower()
             
             if "mx6" in block_lower or "mx-6" in block_lower: matched_machine = "Mx6"
-            elif machine_key_hit("3250", block_lower): matched_machine = "K3250"
-            elif machine_key_hit("3220", block_lower): matched_machine = "X3220NR"
-            elif machine_key_hit("9201", block_lower): matched_machine = "X-9201"
+            elif "3250" in block_lower: matched_machine = "K3250"
+            elif "3220" in block_lower: matched_machine = "X3220NR"
+            elif "9201" in block_lower: matched_machine = "X-9201"
             elif re.search(r'[xk]-?4\d{3}', block_lower) or "x4" in block_lower or "k4" in block_lower: matched_machine = "X4-시리즈"
             elif re.search(r'[xk]-?7\d{3}', block_lower) or "x7" in block_lower or "k7" in block_lower: matched_machine = "X7-시리즈"
             elif "sl-" in block_lower: matched_machine = "SL-"
-            elif "ma2101" in block_lower or "m2101" in block_lower: matched_machine = "MA2101"
+            elif "m2101" in block_lower: matched_machine = "MA2101"
             elif "ma2100" in block_lower: matched_machine = "MA2100"
             elif "hp" in block_lower: matched_machine = "HP"
-            elif machine_key_hit("410", block_lower): matched_machine = "410"
+            elif "410" in block_lower: matched_machine = "410"
             elif "lexmark" in block_lower or "렉스마크" in block_lower: matched_machine = "Lexmark"
             elif "mp-c2003" in block_lower or "c2003" in block_lower: matched_machine = "C3003"
             else:
                 for k in machine_options:
-                    if k not in exclude_machines and machine_key_hit(k, block_lower):
+                    if k not in exclude_machines and k.lower() in block_lower:
                         matched_machine = k
                         break
             
@@ -700,7 +652,7 @@ else:
         
         tab_s, tab_v = st.tabs(["🟢 S, NN, N급 그룹 목록", "💎 V, SS급 그룹 목록"])
         
-        # 🟢 1. S, NN, N급 탭 복구 완료
+        # 🟢 1. S, NN, N급 탭
         with tab_s:
             s_keys = [k for k in group_keys if grouped[k]["grade_group"] == "s_group"]
             if not s_keys: 
@@ -711,16 +663,16 @@ else:
                     info = grouped[gkey]
                     phones, machines, display_name, original_names = info["phones"], info["machines"], info["display_name"], info["original_names"]
                     
-                    # 수신용 메시지 빌드
-                    generated_msg = build_message_by_grade(machines, active_machines, active_templates, "s_group")
+                    generated_msg = build_message_by_grade(machines, active_machines, active_templates, info["grade_group"])
                     
-                    # 4열 배치 시스템 구현
-                    with btn_cols_s[g_idx % 4]:
-                        button_label = f"🟢 {display_name} ({len(machines)}대)"
-                        if st.button(button_label, key=f"btn_s_{gkey}", use_container_width=True):
-                            show_send_popup(display_name, phones, generated_msg, original_names)
-
-        # 💎 2. V, SS급 탭 복구 완료
+                    col_target = btn_cols_s[g_idx % 4]
+                    unit_count = len(machines)
+                    btn_label = f"🟢 {display_name} ({unit_count}대)"
+                    
+                    if col_target.button(btn_label, key=f"btn_s_{gkey}_{g_idx}", use_container_width=True):
+                        show_send_popup(display_name, phones, generated_msg, original_names)
+        
+        # 💎 2. V, SS급 탭
         with tab_v:
             v_keys = [k for k in group_keys if grouped[k]["grade_group"] == "v_group"]
             if not v_keys:
@@ -731,11 +683,32 @@ else:
                     info = grouped[gkey]
                     phones, machines, display_name, original_names = info["phones"], info["machines"], info["display_name"], info["original_names"]
                     
-                    # 수신용 메시지 빌드
-                    generated_msg = build_message_by_grade(machines, active_machines, active_templates, "v_group")
+                    generated_msg = build_message_by_grade(machines, active_machines, active_templates, info["grade_group"])
                     
-                    # 4열 배치 시스템 구현
-                    with btn_cols_v[g_idx % 4]:
-                        button_label = f"💎 {display_name} ({len(machines)}대)"
-                        if st.button(button_label, key=f"btn_v_{gkey}", use_container_width=True):
-                            show_send_popup(display_name, phones, generated_msg, original_names)
+                    col_target = btn_cols_v[g_idx % 4]
+                    unit_count = len(machines)
+                    btn_label = f"💎 {display_name} ({unit_count}대)"
+                    
+                    if col_target.button(btn_label, key=f"btn_v_{gkey}_{g_idx}", use_container_width=True):
+                        show_send_popup(display_name, phones, generated_msg, original_names)
+
+        st.markdown("---")
+        with st.expander("🔍 파싱된 상세 기기 / 고객 정보 수정 (필요시 수동 변경)", expanded=False):
+            for s_info in sms_data_list:
+                i = s_info["index"]
+                st.markdown(f"**[건 #{i}] 원문 데이터**")
+                st.text(s_info["block_raw"])
+                
+                col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
+                with col1:
+                    st.text_input("업체명", key=f"nm_{i}_first", value=st.session_state[f"final_nm_{i}"])
+                with col2:
+                    st.text_input("연락처", key=f"ph_{i}_first", value=st.session_state[f"final_ph_{i}"])
+                with col3:
+                    mach_idx = machine_options.index(st.session_state[f"final_mc_{i}"]) if st.session_state[f"final_mc_{i}"] in machine_options else 0
+                    st.selectbox("기종", options=machine_options, index=mach_idx, key=f"mc_{i}_first")
+                with col4:
+                    gd_opts = ["s_group", "v_group"]
+                    gd_idx = gd_opts.index(st.session_state[f"final_gd_{i}"]) if st.session_state[f"final_gd_{i}"] in gd_opts else 0
+                    st.selectbox("등급", options=gd_opts, index=gd_idx, format_func=lambda x: "V/SS급" if x == "v_group" else "S급 이하", key=f"gd_{i}_first")
+                st.markdown("---")
